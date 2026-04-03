@@ -1,0 +1,4 @@
+name: "cv_classification"
+lr: 3e-4
+weight_decay: 0.05
+optimizer: "AdamW"

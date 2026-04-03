@@ -1,151 +1,104 @@
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import torchvision
-import torchvision.transforms as transforms
-from tqdm.auto import tqdm
+import hydra
+from omegaconf import DictConfig, OmegaConf
+import lightning as L
+from lightning.pytorch.loggers import WandbLogger
+from loguru import logger
+import sys
+import logging
 
-import wandb
-import argparse
-import time
-from models.vit_wrapper import CompareViT
+# Loguru interception for standard logging
+class InterceptHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
 
+        frame, depth = logging.currentframe(), 2
+        while frame.f_code.co_filename == logging.__file__:
+            frame = frame.f_back
+            depth += 1
 
-def get_dataloaders(dataset_name, batch_size):
-    """Fetches CIFAR100 or ImageNet."""
-    transform_train = transforms.Compose(
-        [
-            transforms.RandomResizedCrop(224),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-        ]
-    )
+        logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
 
-    transform_test = transforms.Compose(
-        [
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-        ]
-    )
+def setup_loguru():
+    logging.basicConfig(handlers=[InterceptHandler()], level=logging.INFO, force=True)
+    logger.configure(handlers=[{"sink": sys.stdout, "level": "INFO"}])
 
-    if dataset_name == "cifar100":
-        trainset = torchvision.datasets.CIFAR100(root='./data', train=True, download=True, transform=transform_train)
-        testset = torchvision.datasets.CIFAR100(root='./data', train=False, download=True, transform=transform_test)
-        num_classes = 100
-    elif dataset_name == "imagenet":
-        # Requires manual download of ImageNet to ./data/imagenet
-        trainset = torchvision.datasets.ImageNet(root='./data/imagenet', split='train', transform=transform_train)
-        testset = torchvision.datasets.ImageNet(root='./data/imagenet', split='val', transform=transform_test)
-        num_classes = 1000
+@hydra.main(version_base="1.3", config_path="configs", config_name="config")
+def main(cfg: DictConfig):
+    setup_loguru()
+    logger.info(f"Starting training with config:\n{OmegaConf.to_yaml(cfg)}")
+
+    L.seed_everything(cfg.seed)
+
+    # 1. Setup DataModule
+    if cfg.task.name == "cv_classification":
+        from src.datamodules.cv_datamodule import CVDataModule
+        datamodule = CVDataModule(
+            dataset_name=cfg.datamodule.dataset_name,
+            batch_size=cfg.datamodule.batch_size,
+            num_workers=cfg.datamodule.num_workers
+        )
+        num_classes = cfg.datamodule.num_classes
+    elif cfg.task.name == "nlp_classification":
+        from src.datamodules.nlp_datamodule import NLPDataModule
+        datamodule = NLPDataModule(
+            dataset_name=cfg.datamodule.dataset_name,
+            batch_size=cfg.datamodule.batch_size,
+            num_workers=cfg.datamodule.num_workers,
+            max_length=cfg.datamodule.max_length
+        )
+        num_classes = cfg.datamodule.num_classes
     else:
-        raise ValueError("Unsupported dataset")
+        raise ValueError(f"Unknown task: {cfg.task.name}")
 
-    trainloader = torch.utils.data.DataLoader(
-        trainset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True
+    # 2. Setup Task & Model
+    model_cfg = OmegaConf.to_container(cfg.model, resolve=True)
+    
+    if cfg.task.name == "cv_classification":
+        from src.tasks.classification_cv import CVClassificationTask
+        task = CVClassificationTask(
+            num_classes=num_classes,
+            lr=cfg.task.lr,
+            weight_decay=cfg.task.weight_decay,
+            optimizer=cfg.task.optimizer,
+            model_cfg=model_cfg
         )
-    testloader = torch.utils.data.DataLoader(
-        testset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True
+    elif cfg.task.name == "nlp_classification":
+        from src.tasks.classification_nlp import NLPClassificationTask
+        task = NLPClassificationTask(
+            num_classes=num_classes,
+            lr=cfg.task.lr,
+            weight_decay=cfg.task.weight_decay,
+            optimizer=cfg.task.optimizer,
+            model_cfg=model_cfg
         )
 
-    return trainloader, testloader, num_classes
+    # 3. Setup Logger
+    wandb_logger = WandbLogger(
+        project=cfg.logger.project,
+        name=cfg.logger.name,
+        config=OmegaConf.to_container(cfg, resolve=True)
+    )
 
+    # 4. Setup Trainer
+    trainer = L.Trainer(
+        max_epochs=cfg.trainer.max_epochs,
+        accelerator=cfg.trainer.accelerator,
+        devices=cfg.trainer.devices,
+        precision=cfg.trainer.precision,
+        log_every_n_steps=cfg.trainer.log_every_n_steps,
+        logger=wandb_logger,
+    )
 
-def train(args):
-    # 1. Initialize Weights & Biases
-    wandb.init(project="laplacian-vs-vanilla", config=args)
-    config = wandb.config
+    # 5. Train
+    logger.info("Starting Trainer.fit()...")
+    trainer.fit(model=task, datamodule=datamodule)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # 2. Setup Data
-    trainloader, testloader, num_classes = get_dataloaders(config.dataset, config.batch_size)
-
-    # 3. Initialize Model
-    model = CompareViT(
-        num_classes=num_classes,
-        attn_type=config.attn_type,
-        dim=384,  # Small ViT dimensions
-        depth=6,
-        num_heads=6
-    ).to(device)
-
-    # Optional: Log model gradients to wandb
-    wandb.watch(model, log="all", log_freq=100)
-
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
-
-    print(f"Starting training for {config.attn_type} attention on {config.dataset}...")
-
-    # 4. Training Loop
-    for epoch in range(config.epochs):
-        model.train()
-        running_loss = 0.0
-        start_time = time.time()
-
-        for i, (inputs, labels) in enumerate(tqdm(trainloader)):
-            inputs, labels = inputs.to(device), labels.to(device)
-
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
-
-            running_loss += loss.item()
-
-            if i % 50 == 49:
-                step_time = (time.time() - start_time) / 50
-                wandb.log(
-                    {
-                        "train_loss": running_loss / 50,
-                        "step_time_sec": step_time,
-                        "epoch": epoch
-                    }
-                )
-                running_loss = 0.0
-                start_time = time.time()
-
-        # 5. Validation Loop
-        model.eval()
-        correct = 0
-        total = 0
-        val_loss = 0.0
-        with torch.no_grad():
-            for inputs, labels in testloader:
-                inputs, labels = inputs.to(device), labels.to(device)
-                outputs = model(inputs)
-                loss = criterion(outputs, labels)
-                val_loss += loss.item()
-
-                _, predicted = torch.max(outputs.data, 1)
-                total += labels.size(0)
-                correct += (predicted == labels).sum().item()
-
-        val_acc = 100 * correct / total
-        wandb.log(
-            {
-                "val_loss": val_loss / len(testloader),
-                "val_accuracy": val_acc,
-                "epoch": epoch
-            }
-        )
-        print(f"Epoch {epoch + 1} | Val Acc: {val_acc:.2f}%")
-
-    wandb.finish()
+    logger.info("Starting Trainer.test()...")
+    trainer.test(model=task, datamodule=datamodule)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--attn_type", type=str, default="laplacian", choices=["vanilla", "laplacian"])
-    parser.add_argument("--dataset", type=str, default="cifar100", choices=["cifar100", "imagenet"])
-    parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--lr", type=float, default=3e-4)
-    parser.add_argument("--weight_decay", type=float, default=0.05)
-    parser.add_argument("--epochs", type=int, default=30)
-
-    args = parser.parse_args()
-    train(args)
+    main()
