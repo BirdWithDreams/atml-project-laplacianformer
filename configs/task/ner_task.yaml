@@ -1,0 +1,4 @@
+name: "ner_task"
+lr: 2e-5
+weight_decay: 0.01
+optimizer: "AdamW"
