@@ -54,6 +54,15 @@ def main(cfg: DictConfig):
             max_length=cfg.datamodule.max_length
         )
         num_classes = cfg.datamodule.num_classes
+    elif cfg.task.name == "ner_task":
+        from src.datamodules.ner_datamodule import NERDataModule
+        datamodule = NERDataModule(
+            dataset_name=cfg.datamodule.dataset_name,
+            batch_size=cfg.datamodule.batch_size,
+            num_workers=cfg.datamodule.num_workers,
+            max_length=cfg.datamodule.max_length
+        )
+        num_classes = cfg.datamodule.num_classes
     else:
         raise ValueError(f"Unknown task: {cfg.task.name}")
 
@@ -78,6 +87,29 @@ def main(cfg: DictConfig):
             optimizer=cfg.task.optimizer,
             model_cfg=model_cfg
         )
+    elif cfg.task.name == "ner_task":
+        from src.tasks.ner_task import NERTask
+        from datasets import load_dataset
+        
+        # Grab class names to properly inform seqeval about BIO tags
+        ds = load_dataset(cfg.datamodule.dataset_name, split="train")
+        # Most datasets use either 'ner_tags' or 'tags'
+        tag_col = "ner_tags" if "ner_tags" in ds.features else "tags" if "tags" in ds.features else None
+        
+        id2label = None
+        if tag_col and hasattr(ds.features[tag_col], "feature"):
+            class_names = ds.features[tag_col].feature.names
+            id2label = {i: v for i, v in enumerate(class_names)}
+
+        task = NERTask(
+            num_classes=num_classes,
+            lr=cfg.task.lr,
+            weight_decay=cfg.task.weight_decay,
+            optimizer=cfg.task.optimizer,
+            model_cfg=model_cfg,
+            id2label=id2label
+        )
+
     task = torch.compile(task)
 
     # 3. Setup Logger

@@ -1,0 +1,6 @@
+name: "ontonotes5"
+dataset_name: "tner/ontonotes5"
+batch_size: 32
+num_workers: 4
+max_length: 128
+num_classes: 37 # 18 classes * 2 (B/I) + 1 (O)
