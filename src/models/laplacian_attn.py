@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .rope import apply_2d_rope
+
 
 class NewtonSchulzInverse(nn.Module):
     """
@@ -43,9 +45,11 @@ class LaplacianLinearAttention(nn.Module):
 
     def __init__(
             self, dim: int, num_heads: int = 8, lambda_scale: float = 4.0,
-            pool_ratio: int = 2, ns_iters: int = 5
+            pool_ratio: int = 2, ns_iters: int = 5, use_rope: bool = False,
+            rope_base: float = 10000.0
             ):
         super().__init__()
+        assert dim % num_heads == 0, "dim must be divisible by num_heads"
         self.dim = dim
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
@@ -53,6 +57,8 @@ class LaplacianLinearAttention(nn.Module):
         # Paper explicitly sets lambda to 4 as the optimal scale
         self.lambda_scale = lambda_scale
         self.pool_ratio = pool_ratio
+        self.use_rope = use_rope
+        self.rope_base = rope_base
 
         self.qkv = nn.Linear(dim, dim * 3)
         self.proj = nn.Linear(dim, dim)
@@ -85,10 +91,17 @@ class LaplacianLinearAttention(nn.Module):
             W_sp: Spatial width of the feature map
         """
         B, N, C = x.shape
+        if N != H_sp * W_sp:
+            raise ValueError(f"Expected N == H_sp * W_sp, got {N} vs {H_sp} * {W_sp}")
 
         # 1. Generate Q, K, V
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]  # Shapes: (B, H, N, d)
+        if self.use_rope:
+            q = apply_2d_rope(q, H_sp, W_sp, self.rope_base)
+            k = apply_2d_rope(k, H_sp, W_sp, self.rope_base)
+
+        effective_pool = min(self.pool_ratio, H_sp, W_sp)
 
         # 2. Local Context via DWC on V [cite: 226, 228]
         # Reshape V to spatial dimensions, apply DWC, and flatten back
@@ -100,8 +113,8 @@ class LaplacianLinearAttention(nn.Module):
         q_spatial = q.transpose(1, 2).reshape(B, C, H_sp, W_sp)
         k_spatial = k.transpose(1, 2).reshape(B, C, H_sp, W_sp)
 
-        q_pool = F.avg_pool2d(q_spatial, self.pool_ratio, self.pool_ratio)
-        k_pool = F.avg_pool2d(k_spatial, self.pool_ratio, self.pool_ratio)
+        q_pool = F.avg_pool2d(q_spatial, effective_pool, effective_pool)
+        k_pool = F.avg_pool2d(k_spatial, effective_pool, effective_pool)
 
         q_landmark = q_pool.flatten(2).transpose(1, 2).reshape(B, -1, self.num_heads, self.head_dim).transpose(1, 2)
         k_landmark = k_pool.flatten(2).transpose(1, 2).reshape(B, -1, self.num_heads, self.head_dim).transpose(1, 2)
@@ -150,6 +163,7 @@ class Laplacian1DLinearAttention(nn.Module):
             pool_ratio: int = 2, ns_iters: int = 5
             ):
         super().__init__()
+        assert dim % num_heads == 0, "dim must be divisible by num_heads"
         self.dim = dim
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
@@ -169,42 +183,71 @@ class Laplacian1DLinearAttention(nn.Module):
         l1_dist = torch.norm(diff, p=1, dim=-1)
         return torch.exp(-l1_dist / self.lambda_scale)
 
-    def forward(self, x: torch.Tensor, seq_len: int) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, attention_mask: torch.Tensor | None = None) -> torch.Tensor:
         B, N, C = x.shape
+        if attention_mask is None:
+            token_mask = torch.ones(B, N, device=x.device, dtype=x.dtype)
+        else:
+            if attention_mask.shape != (B, N):
+                raise ValueError(
+                    f"Expected attention_mask shape {(B, N)}, got {tuple(attention_mask.shape)}"
+                )
+            token_mask = attention_mask.to(dtype=x.dtype)
+        effective_pool = min(self.pool_ratio, N)
+        token_mask_seq = token_mask.unsqueeze(1)  # (B, 1, N)
+        token_mask_heads = token_mask.unsqueeze(1).unsqueeze(-1)  # (B, 1, N, 1)
 
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]
+        q = q * token_mask_heads
+        k = k * token_mask_heads
+        v = v * token_mask_heads
 
         # Local Context via 1D DWC
-        v_spatial = v.transpose(1, 2).reshape(B, C, seq_len)
+        v_spatial = v.transpose(1, 2).reshape(B, C, N)
         v_local = self.dwc(v_spatial).transpose(1, 2)
+        v_local = v_local * token_mask.unsqueeze(-1)
 
-        # Landmark Selection via 1D Pooling
-        q_spatial = q.transpose(1, 2).reshape(B, C, seq_len)
-        k_spatial = k.transpose(1, 2).reshape(B, C, seq_len)
+        # Landmark Selection via mask-aware 1D pooling
+        q_spatial = q.transpose(1, 2).reshape(B, C, N)
+        k_spatial = k.transpose(1, 2).reshape(B, C, N)
+        pooled_mask = F.avg_pool1d(token_mask_seq, effective_pool, effective_pool)
+        pooled_mask_safe = pooled_mask.clamp_min(1e-6)
 
-        q_pool = F.avg_pool1d(q_spatial, self.pool_ratio, self.pool_ratio)
-        k_pool = F.avg_pool1d(k_spatial, self.pool_ratio, self.pool_ratio)
+        q_pool = F.avg_pool1d(q_spatial * token_mask_seq, effective_pool, effective_pool) / pooled_mask_safe
+        k_pool = F.avg_pool1d(k_spatial * token_mask_seq, effective_pool, effective_pool) / pooled_mask_safe
+        landmark_mask = (pooled_mask > 0).to(dtype=x.dtype).squeeze(1)  # (B, m)
 
         q_landmark = q_pool.transpose(1, 2).reshape(B, -1, self.num_heads, self.head_dim).transpose(1, 2)
         k_landmark = k_pool.transpose(1, 2).reshape(B, -1, self.num_heads, self.head_dim).transpose(1, 2)
 
         W = self.laplacian_kernel(q_landmark, k_landmark)
+        m = W.shape[-1]
+        landmark_pair_mask = landmark_mask[:, None, :, None] * landmark_mask[:, None, None, :]
+        identity = torch.eye(m, device=x.device, dtype=x.dtype).view(1, 1, m, m)
+        W = W * landmark_pair_mask + identity * (1 - landmark_pair_mask)
         W_inv = self.inverse_solver(W)
 
-        C_q = self.laplacian_kernel(q, k_landmark)
-        C_k = self.laplacian_kernel(k, q_landmark)
+        landmark_attn_mask = landmark_mask[:, None, None, :]
+        C_q = self.laplacian_kernel(q, k_landmark) * landmark_attn_mask
+        C_k = self.laplacian_kernel(k, q_landmark) * landmark_attn_mask
 
-        mu = C_q.mean(dim=(0, 2), keepdim=True)
-        var = C_q.var(dim=(0, 2), keepdim=True)
+        query_mask = token_mask[:, None, :, None]
+        valid_queries = query_mask.sum(dim=(0, 2), keepdim=True).clamp_min(1.0)
+        mu = (C_q * query_mask).sum(dim=(0, 2), keepdim=True) / valid_queries
+        centered = (C_q - mu) * query_mask
+        var = centered.pow(2).sum(dim=(0, 2), keepdim=True) / valid_queries
         C_q_norm = (C_q - mu) / torch.sqrt(var + self.white_eps)
+        C_q_norm = C_q_norm * query_mask
 
         context = torch.matmul(C_k.transpose(-2, -1), v)
         context = torch.matmul(W_inv, context)
         global_attn = torch.matmul(C_q_norm, context)
+        global_attn = global_attn * token_mask_heads
 
         global_attn = global_attn.transpose(1, 2).reshape(B, N, C)
         output = self.proj(global_attn + v_local)
+        output = output * token_mask.unsqueeze(-1)
 
         return output
 
@@ -230,6 +273,6 @@ if __name__ == "__main__":
         dim=dim, num_heads=4, lambda_scale=4.0, pool_ratio=2, ns_iters=5
     )
     
-    out_1d = laplacian_attn_1d(x, seq_len)
+    out_1d = laplacian_attn_1d(x)
     print(f"1D Input shape:  {x.shape}")
-    print(f"1D Output shape: {out_1d.shape}")
+    print(f"1D Output shape: {out_1d.shape}")

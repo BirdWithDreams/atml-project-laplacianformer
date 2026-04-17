@@ -82,7 +82,9 @@ class NLPClassificationTask(L.LightningModule):
     def test_step(self, batch, batch_idx):
         input_ids = batch["input_ids"]
         attention_mask = batch["attention_mask"]
-        labels = batch["label"]
+        labels = batch.get("label")
+        if labels is None or torch.all(labels < 0):
+            return
 
         logits = self(input_ids, attention_mask)
         loss = self.criterion(logits, labels)

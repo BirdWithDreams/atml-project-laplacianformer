@@ -2,6 +2,7 @@ import lightning as L
 import torch
 import torch.nn as nn
 from torchmetrics.classification import MulticlassAccuracy, MulticlassPrecision, MulticlassRecall
+from src.models.pvt import PyramidVisionBackbone
 from src.models.vision import VisionBackbone
 
 class CVClassificationTask(L.LightningModule):
@@ -20,19 +21,41 @@ class CVClassificationTask(L.LightningModule):
         if model_cfg is None:
             model_cfg = {"attn_type": "vanilla", "dim": 384, "depth": 6, "num_heads": 6}
 
-        self.backbone = VisionBackbone(
-            img_size=model_cfg.get("img_size", 224),
-            patch_size=model_cfg.get("patch_size", 16),
-            dim=model_cfg.get("dim", 384),
-            depth=model_cfg.get("depth", 6),
-            num_heads=model_cfg.get("num_heads", 6),
-            attn_type=model_cfg.get("attn_type", "vanilla"),
-            lambda_scale=model_cfg.get("lambda_scale", 4.0),
-            pool_ratio=model_cfg.get("pool_ratio", 2),
-            ns_iters=model_cfg.get("ns_iters", 5),
-        )
+        backbone_type = model_cfg.get("backbone_type", "vit")
+        if backbone_type == "vit":
+            self.backbone = VisionBackbone(
+                img_size=model_cfg.get("img_size", 224),
+                patch_size=model_cfg.get("patch_size", 16),
+                dim=model_cfg.get("dim", 384),
+                depth=model_cfg.get("depth", 6),
+                num_heads=model_cfg.get("num_heads", 6),
+                attn_type=model_cfg.get("attn_type", "vanilla"),
+                lambda_scale=model_cfg.get("lambda_scale", 4.0),
+                pool_ratio=model_cfg.get("pool_ratio", 2),
+                ns_iters=model_cfg.get("ns_iters", 5),
+            )
+            dim = model_cfg.get("dim", 384)
+        elif backbone_type == "pvt":
+            self.backbone = PyramidVisionBackbone(
+                img_size=model_cfg.get("img_size", 224),
+                embed_dims=tuple(model_cfg.get("embed_dims", [64, 128, 320, 512])),
+                depths=tuple(model_cfg.get("depths", [2, 2, 2, 2])),
+                num_heads=tuple(model_cfg.get("num_heads", [1, 2, 5, 8])),
+                mlp_ratios=tuple(model_cfg.get("mlp_ratios", [8.0, 8.0, 4.0, 4.0])),
+                patch_sizes=tuple(model_cfg.get("patch_sizes", [7, 3, 3, 3])),
+                strides=tuple(model_cfg.get("strides", [4, 2, 2, 2])),
+                paddings=tuple(model_cfg.get("paddings", [3, 1, 1, 1])),
+                pool_ratios=tuple(model_cfg.get("pool_ratios", [8, 4, 2, 1])),
+                attn_type=model_cfg.get("attn_type", "laplacian"),
+                lambda_scale=model_cfg.get("lambda_scale", 4.0),
+                ns_iters=model_cfg.get("ns_iters", 5),
+                use_rope=model_cfg.get("use_rope", True),
+                rope_base=model_cfg.get("rope_base", 10000.0),
+            )
+            dim = self.backbone.out_dim
+        else:
+            raise ValueError(f"Unknown backbone_type: {backbone_type}")
 
-        dim = model_cfg.get("dim", 384)
         self.head = nn.Linear(dim, num_classes)
         self.criterion = nn.CrossEntropyLoss()
 

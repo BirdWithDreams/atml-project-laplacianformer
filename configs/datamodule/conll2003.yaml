@@ -1,4 +1,5 @@
 name: "conll2003"
+model_name: "bert-base-cased"
 dataset_name: "eriktks/conll2003"
 batch_size: 32
 num_workers: 4

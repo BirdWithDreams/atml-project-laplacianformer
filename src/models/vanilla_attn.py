@@ -105,7 +105,12 @@ class MultiHeadAttention(nn.Module):
         v = self.w_v(v).view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
 
         if mask is not None:
-            mask = mask.unsqueeze(1)  # Broadcast over heads
+            if mask.dim() == 2:
+                # Key padding mask: (B, N) -> (B, 1, 1, N)
+                mask = mask[:, None, None, :]
+            elif mask.dim() == 3:
+                # Explicit attention mask: (B, N, N) -> (B, 1, N, N)
+                mask = mask[:, None, :, :]
 
         # 2. Apply attention
         x, attn = self.scaled_dot_product_attention(q, k, v, mask)

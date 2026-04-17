@@ -28,6 +28,7 @@ class NERDataModule(L.LightningDataModule):
         def tokenize_and_align_labels(examples):
             # Most NER datasets use 'tokens' or 'words' and 'ner_tags'
             tokens_key = "tokens" if "tokens" in examples else "words"
+            labels_key = "ner_tags" if "ner_tags" in examples else "tags"
             
             tokenized_inputs = self.tokenizer(
                 examples[tokens_key],
@@ -38,7 +39,7 @@ class NERDataModule(L.LightningDataModule):
             )
 
             labels = []
-            for i, label in enumerate(examples["ner_tags"]):
+            for i, label in enumerate(examples[labels_key]):
                 word_ids = tokenized_inputs.word_ids(batch_index=i)
                 previous_word_idx = None
                 label_ids = []

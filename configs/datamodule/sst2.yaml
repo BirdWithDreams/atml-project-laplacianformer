@@ -1,4 +1,5 @@
 name: "sst2"
+model_name: "bert-base-uncased"
 dataset_name: "sst2"
 batch_size: 32
 num_workers: 4

@@ -6,23 +6,27 @@ from torch.utils.data import DataLoader
 import os
 
 class CVDataModule(L.LightningDataModule):
-    def __init__(self, data_dir: str = "./data", dataset_name: str = "cifar100", batch_size: int = 128, num_workers: int = 4):
+    def __init__(
+            self, data_dir: str = "./data", dataset_name: str = "cifar100", batch_size: int = 128,
+            num_workers: int = 4, image_size: int = 224
+            ):
         super().__init__()
         self.data_dir = data_dir
         self.dataset_name = dataset_name.lower()
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.image_size = image_size
 
         self.transform_train = transforms.Compose([
-            transforms.RandomResizedCrop(224),
+            transforms.RandomResizedCrop(self.image_size),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
         ])
 
         self.transform_test = transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
+            transforms.Resize(int(self.image_size * 256 / 224)),
+            transforms.CenterCrop(self.image_size),
             transforms.ToTensor(),
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
         ])

@@ -42,12 +42,14 @@ def main(cfg: DictConfig):
         datamodule = CVDataModule(
             dataset_name=cfg.datamodule.dataset_name,
             batch_size=cfg.datamodule.batch_size,
-            num_workers=cfg.datamodule.num_workers
+            num_workers=cfg.datamodule.num_workers,
+            image_size=cfg.model.get("img_size", cfg.datamodule.get("image_size", 224)),
         )
         num_classes = cfg.datamodule.num_classes
     elif cfg.task.name == "nlp_classification":
         from src.datamodules.nlp_datamodule import NLPDataModule
         datamodule = NLPDataModule(
+            model_name=cfg.datamodule.get("model_name", "bert-base-uncased"),
             dataset_name=cfg.datamodule.dataset_name,
             batch_size=cfg.datamodule.batch_size,
             num_workers=cfg.datamodule.num_workers,
@@ -57,6 +59,7 @@ def main(cfg: DictConfig):
     elif cfg.task.name == "ner_task":
         from src.datamodules.ner_datamodule import NERDataModule
         datamodule = NERDataModule(
+            model_name=cfg.datamodule.get("model_name", "bert-base-cased"),
             dataset_name=cfg.datamodule.dataset_name,
             batch_size=cfg.datamodule.batch_size,
             num_workers=cfg.datamodule.num_workers,
@@ -85,7 +88,9 @@ def main(cfg: DictConfig):
             lr=cfg.task.lr,
             weight_decay=cfg.task.weight_decay,
             optimizer=cfg.task.optimizer,
-            model_cfg=model_cfg
+            model_cfg=model_cfg,
+            vocab_size=len(datamodule.tokenizer),
+            max_seq_len=cfg.datamodule.max_length,
         )
     elif cfg.task.name == "ner_task":
         from src.tasks.ner_task import NERTask
@@ -107,6 +112,8 @@ def main(cfg: DictConfig):
             weight_decay=cfg.task.weight_decay,
             optimizer=cfg.task.optimizer,
             model_cfg=model_cfg,
+            vocab_size=len(datamodule.tokenizer),
+            max_seq_len=cfg.datamodule.max_length,
             id2label=id2label
         )
 
@@ -133,8 +140,12 @@ def main(cfg: DictConfig):
     logger.info("Starting Trainer.fit()...")
     trainer.fit(model=task, datamodule=datamodule)
 
-    logger.info("Starting Trainer.test()...")
-    trainer.test(model=task, datamodule=datamodule)
+    datamodule.setup("test")
+    if getattr(datamodule, "has_test_labels", True) and getattr(datamodule, "test_dataset", object()) is not None:
+        logger.info("Starting Trainer.test()...")
+        trainer.test(model=task, datamodule=datamodule)
+    else:
+        logger.warning("Skipping Trainer.test() because the configured test split has no public labels.")
 
 
 if __name__ == "__main__":
