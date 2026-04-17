@@ -1,4 +1,5 @@
 name: "ontonotes5"
+model_name: "bert-base-cased"
 dataset_name: "tner/ontonotes5"
 label_column: "tags"
 min_freq: 1
