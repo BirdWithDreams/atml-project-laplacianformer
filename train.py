@@ -6,6 +6,10 @@ from loguru import logger
 import sys
 import logging
 
+import torch
+torch.set_float32_matmul_precision('high')
+
+
 # Loguru interception for standard logging
 class InterceptHandler(logging.Handler):
     def emit(self, record):
@@ -74,6 +78,7 @@ def main(cfg: DictConfig):
             optimizer=cfg.task.optimizer,
             model_cfg=model_cfg
         )
+    task = torch.compile(task)
 
     # 3. Setup Logger
     wandb_logger = WandbLogger(

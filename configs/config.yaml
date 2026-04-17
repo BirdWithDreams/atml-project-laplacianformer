@@ -7,9 +7,9 @@ defaults:
 seed: 42
 trainer:
   max_epochs: 30
-  accelerator: auto
-  devices: auto
-  precision: "16-mixed"
+  accelerator: "gpu"
+  devices: 1
+  precision: "bf16-mixed" # <-- Cambiar a bfloat16
   log_every_n_steps: 10
 
 logger:
