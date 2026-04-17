@@ -8,16 +8,23 @@ class TextBackboneNER(nn.Module):
     """
     def __init__(
             self, vocab_size=30522, max_seq_len=128,
-            dim=384, depth=6, num_heads=6, attn_type="vanilla"
+            dim=384, depth=6, num_heads=6, attn_type="vanilla",
+            lambda_scale=4.0, pool_ratio=2, ns_iters=5
             ):
         super().__init__()
         # Standard embedding
         self.token_embed = nn.Embedding(vocab_size, dim)
         self.pos_embed = nn.Embedding(max_seq_len, dim)
+
+        attn_kwargs = {
+            "lambda_scale": lambda_scale,
+            "pool_ratio": pool_ratio,
+            "ns_iters": ns_iters,
+        }
         
         self.blocks = nn.ModuleList(
             [
-                TextTransformerBlock(dim, num_heads, attn_type)
+                TextTransformerBlock(dim, num_heads, attn_type, attn_kwargs)
                 for _ in range(depth)
             ]
         )

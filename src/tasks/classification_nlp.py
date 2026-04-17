@@ -28,7 +28,10 @@ class NLPClassificationTask(L.LightningModule):
             dim=model_cfg.get("dim", 384),
             depth=model_cfg.get("depth", 6),
             num_heads=model_cfg.get("num_heads", 6),
-            attn_type=model_cfg.get("attn_type", "vanilla")
+            attn_type=model_cfg.get("attn_type", "vanilla"),
+            lambda_scale=model_cfg.get("lambda_scale", 4.0),
+            pool_ratio=model_cfg.get("pool_ratio", 2),
+            ns_iters=model_cfg.get("ns_iters", 5),
         )
 
         dim = model_cfg.get("dim", 384)

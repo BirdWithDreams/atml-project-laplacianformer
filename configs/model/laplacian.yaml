@@ -1,5 +1,10 @@
 name: "laplacian"
 attn_type: "laplacian"
+img_size: 224
+patch_size: 16
 dim: 384
 depth: 6
 num_heads: 6
+lambda_scale: 4.0
+pool_ratio: 2
+ns_iters: 5

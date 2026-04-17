@@ -1,0 +1,24 @@
+name: "laplacian_paper"
+attn_type: "laplacian"
+
+# Runnable settings supported by the current codebase.
+img_size: 224
+patch_size: 16
+dim: 384
+depth: 6
+num_heads: 6
+lambda_scale: 4.0
+pool_ratio: 2
+ns_iters: 5
+
+# Paper reference metadata.
+paper_backbone: "PVT"
+paper_positional_encoding: "RoPE"
+paper_landmark_selection: "avg_pool"
+paper_inverse_solver: "newton_schulz"
+paper_local_context: "depthwise_conv"
+paper_cuda_kernels: false
+implementation_notes:
+  - "This repository currently approximates the paper with a single-stage ViT-like backbone."
+  - "RoPE and custom CUDA kernels are not implemented."
+  - "Use this config as a paper-oriented reference point, not as an exact reproduction."

@@ -21,16 +21,25 @@ class PatchEmbedding(nn.Module):
 
 
 class ViTBlock(nn.Module):
-    def __init__(self, dim, num_heads, attn_type="vanilla", grid_size=14):
+    def __init__(self, dim, num_heads, attn_type="vanilla", grid_size=14, attn_kwargs=None):
         super().__init__()
         self.attn_type = attn_type
         self.grid_size = grid_size
+        attn_kwargs = attn_kwargs or {}
 
         self.norm1 = nn.LayerNorm(dim)
         if attn_type == "vanilla":
             self.attn = MultiHeadAttention(d_model=dim, num_heads=num_heads)
         elif attn_type == "laplacian":
-            self.attn = LaplacianLinearAttention(dim=dim, num_heads=num_heads)
+            self.attn = LaplacianLinearAttention(
+                dim=dim,
+                num_heads=num_heads,
+                lambda_scale=attn_kwargs.get("lambda_scale", 4.0),
+                pool_ratio=attn_kwargs.get("pool_ratio", 2),
+                ns_iters=attn_kwargs.get("ns_iters", 5),
+            )
+            self.cls_norm = nn.LayerNorm(dim)
+            self.cls_attn = MultiHeadAttention(d_model=dim, num_heads=num_heads)
         else:
             raise ValueError("attn_type must be 'vanilla' or 'laplacian'")
 
@@ -47,8 +56,18 @@ class ViTBlock(nn.Module):
             norm_x = self.norm1(x)
             x = x + self.attn(norm_x, norm_x, norm_x)
         else:
-            # Laplacian expects (x, H_sp, W_sp)
-            x = x + self.attn(self.norm1(x), self.grid_size, self.grid_size)
+            cls_token, spatial_x = x[:, :1], x[:, 1:]
+            norm_spatial = self.norm1(spatial_x)
+            spatial_x = spatial_x + self.attn(norm_spatial, self.grid_size, self.grid_size)
+
+            cls_context = torch.cat((cls_token, spatial_x), dim=1)
+            norm_cls_context = self.cls_norm(cls_context)
+            cls_token = cls_token + self.cls_attn(
+                norm_cls_context[:, :1],
+                norm_cls_context,
+                norm_cls_context,
+            )
+            x = torch.cat((cls_token, spatial_x), dim=1)
 
         x = x + self.mlp(self.norm2(x))
         return x
@@ -57,16 +76,23 @@ class ViTBlock(nn.Module):
 class CompareViT(nn.Module):
     def __init__(
             self, img_size=224, patch_size=16, num_classes=1000,
-            dim=384, depth=6, num_heads=6, attn_type="vanilla"
+            dim=384, depth=6, num_heads=6, attn_type="vanilla",
+            lambda_scale=4.0, pool_ratio=2, ns_iters=5
             ):
         super().__init__()
         self.patch_embed = PatchEmbedding(img_size, patch_size, 3, dim)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, dim))
         self.pos_embed = nn.Parameter(torch.zeros(1, self.patch_embed.num_patches + 1, dim))
 
+        attn_kwargs = {
+            "lambda_scale": lambda_scale,
+            "pool_ratio": pool_ratio,
+            "ns_iters": ns_iters,
+        }
+
         self.blocks = nn.ModuleList(
             [
-                ViTBlock(dim, num_heads, attn_type, self.patch_embed.grid_size)
+                ViTBlock(dim, num_heads, attn_type, self.patch_embed.grid_size, attn_kwargs)
                 for _ in range(depth)
             ]
         )
@@ -82,17 +108,8 @@ class CompareViT(nn.Module):
         x = torch.cat((cls_tokens, x), dim=1)
         x = x + self.pos_embed
 
-        # Note: We slice off the cls_token for the spatial Laplacian attention
-        # and add it back, or just process the tokens. For simplicity in this blueprint,
-        # we process everything but pass grid_size to Laplacian.
         for block in self.blocks:
-            if block.attn_type == "laplacian":
-                # Laplacian expects strict spatial grid, exclude cls_token temporarily
-                cls_token, spatial_x = x[:, :1], x[:, 1:]
-                spatial_x = block(spatial_x)
-                x = torch.cat((cls_token, spatial_x), dim=1)
-            else:
-                x = block(x)
+            x = block(x)
 
         x = self.norm(x)
         return self.head(x[:, 0])
