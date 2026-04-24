@@ -1,211 +1,277 @@
-# Laplacianformer Experiments
+# Laplacian vs. Vanilla Transformer
 
-This repository supports four Hydra task configs:
+This repository is a research codebase for comparing standard softmax attention against Laplacian linear attention from *LaplacianFormer: Rethinking Linear Attention with Laplacian Kernel*.
 
-- `cv_classification`
-- `semantic_segmentation`
-- `nlp_classification`
-- `ner_task`
-- `generation_nlp`
+The project now serves two purposes:
+
+- paper-oriented computer vision experiments
+- extension experiments in NLP and NER
+
+The current best paper match is the PVT-style vision backbone with RoPE and Laplacian attention. The older ViT-like vision models and the NLP/NER models are still useful, but they should be treated as baselines or extensions rather than as the closest reproduction of the paper.
+
+For model-specific architecture notes, see [src/models/README.md](</D:/Studying/USI MAI/atml-project/src/models/README.md:1>).
+
+## Project Layout
+
+- `src/models/`: reusable backbones and attention modules
+- `src/tasks/`: Lightning tasks for CV classification, NLP classification, and NER
+- `src/datamodules/`: dataset wrappers for CIFAR-100, SST-2, CoNLL-2003, and OntoNotes 5
+- `configs/`: Hydra configuration groups
+- `scripts/`: convenience scripts for experiment sweeps
+- `train.py`: Hydra entrypoint that composes the config and launches training
+
+## Model Families
+
+### Vision
+
+- `vision.py` and `vit_wrapper.py`: flat ViT-like baselines
+- `pvt.py`: hierarchical PVT-style backbone with optional RoPE
+- `laplacian_attn.py`: 2D Laplacian attention for vision
+- `rope.py`: 2D rotary positional encoding utilities
+
+Best paper match:
+
+- `model=laplacian_pvt_tiny`
+- `model=laplacian_pvt_small`
+
+### Text and NER
+
+- `text.py`: sequence classification backbone
+- `text_ner.py`: token classification backbone for NER
+- `laplacian_attn.py`: 1D Laplacian attention with padding-mask support
+- `vanilla_attn.py`: standard softmax attention baseline
+
+These are project extensions, not part of the original paper reproduction claim.
+
+## Hydra Config Structure
+
+The config tree is now organized by concern:
+
+- `configs/config.yaml`: root composition entrypoint
+- `configs/task/`: task identity and task-level defaults
+- `configs/model/`: architecture presets
+- `configs/datamodule/`: dataset and tokenizer settings
+- `configs/optimizer/`: optimizer presets
+- `configs/trainer/`: Lightning trainer settings
+- `configs/logger/`: logging backend settings
+
+At runtime, the composed config has these top-level groups:
+
+- `task`
+- `model`
+- `datamodule`
+- `optimizer`
+- `trainer`
+- `logger`
+
+Task configs override the default optimizer group through Hydra. For example:
+
+- `task=cv_classification` defaults to `optimizer=adamw_cv_default`
+- `task=ner_task` defaults to `optimizer=adamw_text_default`
+
+You can still override the optimizer explicitly from the CLI.
+
+## Model Presets
+
+### ViT-like Text and NER Presets
+
+Vanilla presets:
+
+- `vanilla_tiny`
+- `vanilla_small`
+- `vanilla_medium`
+
+Laplacian presets:
+
+- `laplacian_tiny`
+- `laplacian_small`
+- `laplacian_medium`
+
+These are the main size-controlled presets for NLP and NER experiments.
+
+### Vision-Oriented Presets
+
+- `vanilla`: legacy ViT-like vanilla baseline
+- `laplacian`: legacy ViT-like Laplacian baseline
+- `laplacian_pvt_tiny`: recommended paper-oriented vision config
+- `laplacian_pvt_small`: larger paper-oriented vision config
+- `laplacian_paper`: reference metadata config, not the best runnable architecture
+
+## Optimizer Presets
+
+The optimizer group currently includes:
+
+- `adamw_cv_default`
+- `adamw_text_default`
+- `adamw_text_high_lr`
+- `adam_text_baseline`
+
+These configs control:
+
+- optimizer type
+- learning rate
+- weight decay
+
+Example:
+
+```bash
+python train.py task=ner_task model=laplacian_small datamodule=conll2003 optimizer=adam_text_baseline
+```
 
 ## Environment Setup
 
-Create and activate the project virtual environment, then install the Python
-dependencies and local CUDA extension:
+This project uses a standard Python virtual environment.
+
+Create and activate the environment:
 
 ```bash
-uv venv .venv --python 3.10
-source ./.venv/bin/activate
-uv pip install -r requirements.txt
-cd ./libs/laplacianformer
-uv pip install -e . --no-build-isolation
-cd ../..
-uv pip install seqeval
+python -m venv .venv
 ```
 
-## Model Matrix
-
-Image tasks use only PVT-style backbones with 2D RoPE:
-
-- `vanilla_pvt_tiny`
-- `vanilla_pvt_small`
-- `vanilla_pvt_medium`
-- `laplacian_pvt_tiny_cuda`
-- `laplacian_pvt_small_cuda`
-- `laplacian_pvt_medium_cuda`
-
-Text tasks use only 1D sequence backbones:
-
-- `vanilla_1d_tiny`
-- `vanilla_1d_small`
-- `vanilla_1d_medium`
-- `laplacian_1d_cuda_tiny`
-- `laplacian_1d_cuda_small`
-- `laplacian_1d_cuda_medium`
-
-The CUDA Laplacian configs do not fall back to torch. Run them with
-`trainer.precision=32`.
-
-## Examples
-
-CV classification:
+On Windows PowerShell:
 
 ```bash
-uv run train.py task=cv_classification model=vanilla_pvt_small datamodule=cifar100
-uv run train.py task=cv_classification model=laplacian_pvt_small_cuda datamodule=cifar100 trainer.precision=32
+.\.venv\Scripts\Activate.ps1
 ```
 
-Semantic segmentation:
+On macOS or Linux:
 
 ```bash
-uv run train.py task=semantic_segmentation model=vanilla_pvt_small datamodule=voc2012_segmentation
-uv run train.py task=semantic_segmentation model=vanilla_pvt_small datamodule=cityscapes_segmentation
-uv run train.py task=semantic_segmentation model=laplacian_pvt_small_cuda datamodule=voc2012_segmentation trainer.precision=32
+source .venv/bin/activate
 ```
 
-Cityscapes uses the 5k fine-annotation split and expects the downloaded files
-under `./data/cityscapes/leftImg8bit/{train,val}` and
-`./data/cityscapes/gtFine/{train,val}`.
-
-Text classification:
+Install dependencies with:
 
 ```bash
-uv run train.py task=nlp_classification model=vanilla_1d_small datamodule=sst2
-uv run train.py task=nlp_classification model=laplacian_1d_cuda_small datamodule=sst2 trainer.precision=32
-uv run train.py task=nlp_classification_ag_news
+python -m pip install --upgrade pip
+pip install -r requirements.txt
 ```
 
-NER:
+## Running Experiments
+
+### Computer Vision
+
+Legacy ViT-like vanilla baseline:
 
 ```bash
-uv run train.py task=ner_task model=vanilla_1d_small datamodule=conll2003
-uv run train.py task=ner_task model=laplacian_1d_cuda_small datamodule=ontonotes5 trainer.precision=32
+python train.py task=cv_classification model=vanilla datamodule=cifar100
 ```
 
-Text Generation (Summarization/Translation):
-```bash
-uv run train.py task=generation_nlp model=vanilla_seq2seq_base datamodule=seq2seq
-
-uv run train.py task=generation_nlp model=vanilla_seq2seq_base model.attn_type=laplacian datamodule=seq2seq trainer.precision=32
-```
-
-ImageNet Sample Classification:
-
-To test ImageNet classification without downloading the full 150GB dataset, you can fetch a 100-class sample.
-
-1. Download and extract the sample:
-```bash
-uv run python download_sample.py
-```
-
-2. Run the training task:
-```bash
-uv run train.py task=cv_classification model=vanilla_pvt_small datamodule=imagenet
-```
-
-Visualize Attention Maps (Vanilla vs. Laplacian):
-You can generate side-by-side heatmaps to compare how the different kernels distribute attention weights. This script supports both images and text and outputs a `.png` file.
-
-1. For Computer Vision (Provide a path to an image):
-```bash
-uv run python scripts/visualize_attention.py --mode vision --data_path "./data/imagenette2-320/train/n01440764/ILSVRC2012_val_00000293.JPEG"
-```
-
-2. For NLP (Provide a text prompt wrapped in quotes):
+Legacy ViT-like Laplacian baseline:
 
 ```bash
-uv run python scripts/visualize_attention.py --mode text --data_path "The Laplacian kernel decays slower than Gaussian, allowing the network to retain distant context."
+python train.py task=cv_classification model=laplacian datamodule=cifar100
 ```
 
-
-
-## Matrix Scripts
-
-NER matrix:
+Best paper-oriented vision run:
 
 ```bash
-scripts/run_ner_model_matrix.sh
+python train.py task=cv_classification model=laplacian_pvt_tiny datamodule=cifar100
 ```
 
-Segmentation matrix:
+### NLP Classification
 
 ```bash
-scripts/run_segmentation_model_matrix.sh
+python train.py task=nlp_classification model=laplacian_small datamodule=sst2
 ```
 
-NLP classification matrix:
+### NER
+
+CoNLL-2003 with a vanilla tiny model:
 
 ```bash
-scripts/run_nlp_classification_model_matrix.sh
+python train.py task=ner_task model=vanilla_tiny datamodule=conll2003
 ```
 
-## Benchmarking Checkpoints
-
-`benchmark.py` evaluates Lightning checkpoints on a deterministic test subset and
-writes JSONL/CSV summaries with metrics, forward-only inference time, and memory:
+OntoNotes 5 with a Laplacian medium model:
 
 ```bash
-uv run python benchmark.py \
-  'runs=[{name:ag_news_vanilla,task:nlp_classification,datamodule:ag_news,checkpoint_path:results/path/to/checkpoint.ckpt}]'
+python train.py task=ner_task model=laplacian_medium datamodule=ontonotes5
 ```
 
-For multiple checkpoints, use a glob:
+### Useful Overrides
+
+Change epochs, precision, or batch size directly from the CLI:
 
 ```bash
-uv run python benchmark.py \
-  'runs=[{name:ag_news_matrix,task:nlp_classification,datamodule:ag_news,checkpoint_glob:results/**/last.ckpt}]'
+python train.py task=ner_task model=laplacian_small datamodule=conll2003 trainer.max_epochs=5 trainer.precision=32-true datamodule.batch_size=16
 ```
 
-Defaults live in `configs/benchmark/default.yaml`. Common overrides:
-`max_samples=2048`, `warmup_batches=10`, `device=cuda`, and per-run
-`datamodule_overrides={batch_size:32,num_workers:0}`.
-
-A single benchmark config can mix tasks:
-
-```yaml
-runs:
-  - name: cifar100_vanilla
-    task: cv_classification
-    datamodule: cifar100
-    checkpoint_path: results/cifar100.ckpt
-  - name: ag_news_vanilla
-    task: nlp_classification
-    datamodule: ag_news
-    checkpoint_path: results/ag_news.ckpt
-  - name: conll2003_vanilla
-    task: ner_task
-    datamodule: conll2003
-    checkpoint_path: results/conll2003.ckpt
-  - name: voc2012_vanilla
-    task: semantic_segmentation
-    datamodule: voc2012_segmentation
-    checkpoint_path: results/voc2012.ckpt
-```
-
-Or with `screen` (preffered):
-```bash
-LOG="./logs/ner_log_$(date +%Y%m%d_%H%M%S).log" && screen -S ner_run -L -Logfile "$LOG" -dm bash -lc 'cd /workspace/atml-project-laplacianformer && source .venv/bin/activate && bash scripts/run_ner_model_matrix.sh'
-LOG="./logs/ner_log_$(date +%Y%m%d_%H%M%S).log" && screen -S ner_run -L -Logfile "$LOG" -dm bash -lc 'cd /workspace/atml-project-laplacianformer && source .venv/bin/activate && bash scripts/run_ner_gen2_model_matrix.sh --skip 3'
-
-LOG="./logs/seg_log_$(date +%Y%m%d_%H%M%S).log" && screen -S seg_run -L -Logfile "$LOG" -dm bash -lc 'cd /workspace/atml-project-laplacianformer && source .venv/bin/activate && bash scripts/run_segmentation_model_matrix.sh --skip 4'
-LOG="./logs/nlp_log_$(date +%Y%m%d_%H%M%S).log" && screen -S nlp_run -L -Logfile "$LOG" -dm bash -lc 'cd /workspace/atml-project-laplacianformer && source .venv/bin/activate && bash scripts/run_nlp_classification_model_matrix.sh'
-LOG="./logs/cls_log_$(date +%Y%m%d_%H%M%S).log" && screen -S cls_run -L -Logfile "$LOG" -dm bash -lc 'cd /workspace/atml-project-laplacianformer && source .venv/bin/activate && bash scripts/run_cv_classification_matrix.sh'
-```
-
-Both scripts accept space-separated environment overrides, for example:
+Override the default optimizer selected by the task:
 
 ```bash
-MODELS="vanilla_pvt_small laplacian_pvt_small_cuda" \
-DATASETS="voc2012_segmentation cityscapes_segmentation" \
-scripts/run_segmentation_model_matrix.sh
+python train.py task=ner_task model=vanilla_small datamodule=ontonotes5 optimizer=adamw_text_high_lr
 ```
 
-## Model Code
+## Sequential NER Sweep
 
-`src/models` is intentionally narrow:
+To run the current NER matrix sequentially across both NER datasets, use:
 
-- image: `pvt.py`, `rope.py`, `segmentation.py`, 2D Laplacian CUDA wrappers
-- text: `text.py`, `text_ner.py`, `laplacian_1d_attn.py`, 1D Laplacian CUDA wrapper
-- shared attention: `vanilla_attn.py`, `laplacian_attn.py`
+```bash
+bash scripts/run_ner_model_matrix.sh
+```
 
-The old flat ViT-style vision path and non-task model configs were removed.
+The script runs:
+
+- 6 model presets
+- 3 optimizer presets
+- 2 datasets
+
+Current datasets:
+
+- `conll2003`
+- `ontonotes5`
+
+Current model list:
+
+- `vanilla_tiny`
+- `vanilla_small`
+- `vanilla_medium`
+- `laplacian_tiny`
+- `laplacian_small`
+- `laplacian_medium`
+
+Current optimizer list:
+
+- `adamw_text_default`
+- `adamw_text_high_lr`
+- `adam_text_baseline`
+
+The script uses `python train.py` from the active virtual environment, continues after failed runs, and reports any failures at the end.
+
+You can adjust the sweep with environment variables:
+
+```bash
+MAX_EPOCHS=5 ACCELERATOR=gpu DEVICES=1 PRECISION=bf16-mixed WANDB_PROJECT=ner-model-matrix bash scripts/run_ner_model_matrix.sh
+```
+
+Additional Hydra overrides passed to the script are forwarded to every run.
+
+## Notes On Paper Matching
+
+What should be treated as the closest paper match in this repository:
+
+- `PyramidVisionBackbone` from `src/models/pvt.py`
+- `LaplacianLinearAttention` from `src/models/laplacian_attn.py`
+- 2D RoPE from `src/models/rope.py`
+- `model=laplacian_pvt_tiny` or `model=laplacian_pvt_small`
+
+What should not be described as the closest paper reproduction:
+
+- the flat ViT-like `vanilla` and `laplacian` vision configs
+- the NLP and NER extensions
+- `laplacian_paper`, which is now only a reference metadata config
+
+The current implementation is architecture-faithful and method-faithful in plain PyTorch, but it is not a guaranteed exact reproduction of the paper because the original custom CUDA kernels and official training code are not available here.
+
+## Extending The Repo
+
+If you add a new experiment family, keep the same separation of concerns:
+
+- add a new `src/datamodules/*.py` file for data handling
+- add or extend a model in `src/models/`
+- add a task in `src/tasks/`
+- add Hydra presets under the appropriate group in `configs/`
+- wire the new task/datamodule path in `train.py`
+
+That keeps the CLI stable and makes sweep scripts easy to compose.

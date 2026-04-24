@@ -18,6 +18,8 @@ class NewtonSchulzInverse(nn.Module):
 
     def forward(self, W: torch.Tensor) -> torch.Tensor:
         # W shape: (B, H, m, m)
+        orig_dtype = W.dtype
+        W = W.float()
         B, H, m, _ = W.shape
         I = torch.eye(m, device=W.device, dtype=W.dtype).view(1, 1, m, m)
 
@@ -35,7 +37,19 @@ class NewtonSchulzInverse(nn.Module):
         for _ in range(self.num_iters):
             X = X @ (2 * I - W_eps @ X)
 
-        return X
+        residual = torch.linalg.norm(I - W_eps @ X, dim=(-2, -1))
+        invalid = (
+            ~torch.isfinite(X).all(dim=(-2, -1))
+            | ~torch.isfinite(residual)
+            | (residual > 1.0)
+        )
+
+        if invalid.any():
+            X = X.clone()
+            invalid_w = W_eps[invalid]
+            X[invalid] = torch.linalg.pinv(invalid_w)
+
+        return X.to(orig_dtype)
 
 
 class LaplacianLinearAttention(nn.Module):

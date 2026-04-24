@@ -18,6 +18,16 @@ class NLPDataModule(L.LightningDataModule):
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.has_test_labels = True
 
+    @staticmethod
+    def _collate_batch(batch):
+        output = {
+            "input_ids": torch.tensor([example["input_ids"] for example in batch], dtype=torch.long),
+            "attention_mask": torch.tensor([example["attention_mask"] for example in batch], dtype=torch.long),
+        }
+        if "label" in batch[0]:
+            output["label"] = torch.tensor([example["label"] for example in batch], dtype=torch.long)
+        return output
+
     def prepare_data(self):
 <<<<<<< HEAD
         if self.dataset_name == "ag_news":
@@ -67,10 +77,11 @@ class NLPDataModule(L.LightningDataModule):
         def tokenize_function(examples):
             return self.tokenizer(examples["sentence"], padding="max_length", truncation=True, max_length=self.max_length)
 
-        tokenized_datasets = dataset.map(tokenize_function, batched=True)
-        for split_name, split_dataset in tokenized_datasets.items():
-            columns = [col for col in ["input_ids", "attention_mask", "label"] if col in split_dataset.column_names]
-            tokenized_datasets[split_name].set_format("torch", columns=columns)
+        tokenized_datasets = dataset.map(
+            tokenize_function,
+            batched=True,
+            remove_columns=[col for col in dataset["train"].column_names if col != "label"],
+        )
 
         if stage == "fit" or stage is None:
             self.train_dataset = tokenized_datasets["train"]
@@ -86,10 +97,34 @@ class NLPDataModule(L.LightningDataModule):
 >>>>>>> 731ec0b (Add hierarchical Pyramid Vision Transformer (PVT) backbone with Laplacian attention, refine RoPE utilities, update classification tasks to support configurable backbones, and improve datamodule flexibility with dynamic dataset parameters.)
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, pin_memory=True)
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+            pin_memory=True,
+            persistent_workers=self.num_workers > 0,
+            collate_fn=self._collate_batch,
+        )
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers, pin_memory=True)
+        return DataLoader(
+            self.val_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            pin_memory=True,
+            persistent_workers=self.num_workers > 0,
+            collate_fn=self._collate_batch,
+        )
 
     def test_dataloader(self):
-        return DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers, pin_memory=True)
+        return DataLoader(
+            self.test_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            pin_memory=True,
+            persistent_workers=self.num_workers > 0,
+            collate_fn=self._collate_batch,
+        )

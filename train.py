@@ -67,42 +67,31 @@ def main(cfg: DictConfig):
             max_length=cfg.datamodule.max_length
         )
         num_classes = cfg.datamodule.num_classes
-    elif cfg.task.name == "detection":
-        from src.datamodules.detection_datamodule import VOCDataModule
-        datamodule = VOCDataModule(
-            batch_size=cfg.datamodule.batch_size,
-            num_workers=cfg.datamodule.num_workers
-        )
-        num_classes = cfg.datamodule.num_classes
-    elif cfg.task.name == "detection":
-        from src.datamodules.detection_datamodule import VOCDataModule
-        datamodule = VOCDataModule(
-            batch_size=cfg.datamodule.batch_size,
-            num_workers=cfg.datamodule.num_workers
-        )
-        num_classes = cfg.datamodule.num_classes
     else:
         raise ValueError(f"Unknown task: {cfg.task.name}")
 
     # 2. Setup Task & Model
     model_cfg = OmegaConf.to_container(cfg.model, resolve=True)
+    optimizer_name = cfg.optimizer.optimizer
+    lr = cfg.optimizer.lr
+    weight_decay = cfg.optimizer.weight_decay
     
     if cfg.task.name == "cv_classification":
         from src.tasks.classification_cv import CVClassificationTask
         task = CVClassificationTask(
             num_classes=num_classes,
-            lr=cfg.task.lr,
-            weight_decay=cfg.task.weight_decay,
-            optimizer=cfg.task.optimizer,
+            lr=lr,
+            weight_decay=weight_decay,
+            optimizer=optimizer_name,
             model_cfg=model_cfg
         )
     elif cfg.task.name == "nlp_classification":
         from src.tasks.classification_nlp import NLPClassificationTask
         task = NLPClassificationTask(
             num_classes=num_classes,
-            lr=cfg.task.lr,
-            weight_decay=cfg.task.weight_decay,
-            optimizer=cfg.task.optimizer,
+            lr=lr,
+            weight_decay=weight_decay,
+            optimizer=optimizer_name,
             model_cfg=model_cfg,
             vocab_size=len(datamodule.tokenizer),
             max_seq_len=cfg.datamodule.max_length,
@@ -123,27 +112,17 @@ def main(cfg: DictConfig):
 
         task = NERTask(
             num_classes=num_classes,
-            lr=cfg.task.lr,
-            weight_decay=cfg.task.weight_decay,
-            optimizer=cfg.task.optimizer,
+            lr=lr,
+            weight_decay=weight_decay,
+            optimizer=optimizer_name,
             model_cfg=model_cfg,
             vocab_size=len(datamodule.tokenizer),
             max_seq_len=cfg.datamodule.max_length,
             id2label=id2label
         )
 
-    elif cfg.task.name == "detection":
-        from src.tasks.detection import ObjectDetectionTask
-        task = ObjectDetectionTask(
-            num_classes=num_classes,
-            lr=cfg.task.lr,
-            weight_decay=cfg.task.weight_decay,
-            optimizer=cfg.task.optimizer,
-            model_cfg=model_cfg
-        )
-    if cfg.task.name != "detection":
-        task = torch.compile(task)
-        
+    # task = torch.compile(task)
+
     # 3. Setup Logger
     wandb_logger = WandbLogger(
         project=cfg.logger.project,
