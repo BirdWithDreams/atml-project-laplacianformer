@@ -1,18 +1,2 @@
 project: "laplacian-vs-vanilla"
-entity: "anmero-espol"
 name: "${task.name}_${model.name}_${datamodule.name}_${optimizer.name}"
-extra_tags: []
-save_dir: "./results"
-
-checkpoint_dir: null
-checkpoint_add_timestamp: true
-checkpoint_filename: "epoch={epoch}-step={step}"
-checkpoint_save_top_k: 1
-checkpoint_save_last: true
-checkpoint_monitor: null
-checkpoint_mode: "min"
-checkpoint_auto_insert_metric_name: false
-
-log_segmentation_images: true
-num_log_segmentation_images: 4
-log_segmentation_images_every_n_epochs: 1

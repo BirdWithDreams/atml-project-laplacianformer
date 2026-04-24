@@ -153,7 +153,7 @@ So the correct wording is:
 For the closest paper-oriented CV experiments, start from:
 
 ```bash
-uv run train.py task=cv_classification model=laplacian_pvt_tiny datamodule=cifar100
+python train.py task=cv_classification model=laplacian_pvt_tiny datamodule=cifar100
 ```
 
 Use the ViT-like models only when you explicitly want a baseline or ablation against the paper-oriented backbone.
