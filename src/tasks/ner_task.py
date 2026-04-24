@@ -76,6 +76,9 @@ class NERTask(L.LightningModule):
             id2label: dict = None
             ):
         super().__init__()
+        self.optimizer = optimizer
+        self.weight_decay = weight_decay
+        self.lr = lr
         self.save_hyperparameters()
 
         # Initialize Backbone via model_cfg

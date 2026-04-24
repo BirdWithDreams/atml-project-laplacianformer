@@ -1,0 +1,4 @@
+name: "adamw_text_default"
+optimizer: "AdamW"
+lr: 2e-5
+weight_decay: 0.01

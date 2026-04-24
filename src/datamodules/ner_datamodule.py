@@ -18,11 +18,22 @@ class NERDataModule(L.LightningDataModule):
         # add_prefix_space is required for some models for token classification with fast tokenizers
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, add_prefix_space=True)
 
+    def _load_dataset(self):
+        return load_dataset(self.dataset_name)
+
+    @staticmethod
+    def _collate_batch(batch):
+        return {
+            "input_ids": torch.tensor([example["input_ids"] for example in batch], dtype=torch.long),
+            "attention_mask": torch.tensor([example["attention_mask"] for example in batch], dtype=torch.long),
+            "labels": torch.tensor([example["labels"] for example in batch], dtype=torch.long),
+        }
+
     def prepare_data(self):
-        load_dataset(self.dataset_name)
+        self._load_dataset()
 
     def setup(self, stage=None):
-        dataset = load_dataset(self.dataset_name)
+        dataset = self._load_dataset()
         
         # Tokenize and align labels
         def tokenize_and_align_labels(examples):
@@ -60,8 +71,11 @@ class NERDataModule(L.LightningDataModule):
             tokenized_inputs["labels"] = labels
             return tokenized_inputs
 
-        tokenized_datasets = dataset.map(tokenize_and_align_labels, batched=True)
-        tokenized_datasets.set_format("torch", columns=["input_ids", "attention_mask", "labels"])
+        tokenized_datasets = dataset.map(
+            tokenize_and_align_labels,
+            batched=True,
+            remove_columns=dataset["train"].column_names,
+        )
         
         if stage == "fit" or stage is None:
             self.train_dataset = tokenized_datasets["train"]
@@ -71,10 +85,34 @@ class NERDataModule(L.LightningDataModule):
             self.test_dataset = tokenized_datasets["test"]
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, pin_memory=True)
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+            pin_memory=True,
+            persistent_workers=self.num_workers > 0,
+            collate_fn=self._collate_batch,
+        )
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers, pin_memory=True)
+        return DataLoader(
+            self.val_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            pin_memory=True,
+            persistent_workers=self.num_workers > 0,
+            collate_fn=self._collate_batch,
+        )
 
     def test_dataloader(self):
-        return DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers, pin_memory=True)
+        return DataLoader(
+            self.test_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            pin_memory=True,
+            persistent_workers=self.num_workers > 0,
+            collate_fn=self._collate_batch,
+        )

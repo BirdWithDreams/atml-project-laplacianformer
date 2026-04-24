@@ -1,4 +1,6 @@
-name: "nlp_classification"
-lr: 2e-5
-weight_decay: 0.01
-optimizer: "AdamW"
+# @package _global_
+defaults:
+  - override /optimizer: adamw_text_default
+
+task:
+  name: "nlp_classification"

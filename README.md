@@ -1,112 +1,277 @@
-# Laplacian vs. Vanilla Transformer: An Attention Comparison
- 
-This project serves as a scalable, robust research repository to compare traditional $\mathcal{O}(N^2)$ **Vanilla Softmax Attention** against the $\mathcal{O}(N)$ **Laplacian Linear Attention** mechanism (introduced in the paper *"LaplacianFormer: Rethinking Linear Attention with Laplacian Kernel"*).
+# Laplacian vs. Vanilla Transformer
 
-Standard linear attention models often rely on Gaussian kernels, which can over-suppress mid-range token interactions and lead to vanishing gradients. This repository tests the hypothesis that replacing the Gaussian kernel with a Laplacian kernel ($l_1$ distance) improves gradient flow and token representation while maintaining linear computational complexity.
+This repository is a research codebase for comparing standard softmax attention against Laplacian linear attention from *LaplacianFormer: Rethinking Linear Attention with Laplacian Kernel*.
 
-The architecture is built on top of **PyTorch Lightning** and **Hydra** for maximum reproducibility, clean code separation, and effortless configuration.
+The project now serves two purposes:
 
----
+- paper-oriented computer vision experiments
+- extension experiments in NLP and NER
 
-## 🏗️ Architecture: What is implemented, where and why?
+The current best paper match is the PVT-style vision backbone with RoPE and Laplacian attention. The older ViT-like vision models and the NLP/NER models are still useful, but they should be treated as baselines or extensions rather than as the closest reproduction of the paper.
 
-We follow a strict separation of concerns, decoupling the **Backbone** (how tokens attend to each other) from the **Task** (how loss is computed) and the **Data** (what feeds the model).
+For model-specific architecture notes, see [src/models/README.md](</D:/Studying/USI MAI/atml-project/src/models/README.md:1>).
 
-### 1. Backbones (`src/models/`)
-The backbone's only job is to turn raw sequences or images into rich embeddings. 
-- **`vision.py`**: Contains `VisionBackbone` (a ViT-like architecture). It splits images into patches and returns the `[CLS]` token embedding.
-- **`text.py`**: Contains `TextBackbone`, which embeds standard 1D text token sequences (like BERT). It returns the average pooled sequence embedding.
-- **`vanilla_attn.py` & `laplacian_attn.py`**: Contain the core attention logic. Notably, `laplacian_attn.py` has been expanded to include `Laplacian1DLinearAttention` specifically designed for 1D text sequences.
+## Project Layout
 
-### 2. Lightning Modules / Tasks (`src/tasks/`)
-Tasks are PyTorch Lightning modules (`LightningModule`). They contain the training loop, optimizer configuration, and metrics logic.
-- **`classification_cv.py`**: Defines `CVClassificationTask`. It initializes a Vision Backbone, creates a Linear Head for classification, utilizes `CrossEntropyLoss`, tracking accuracy, precision, and recall via `torchmetrics`.
-- **`classification_nlp.py`**: Defines `NLPClassificationTask`. Similar to CV, it initializes a Text Backbone and trains the model for text classification.
+- `src/models/`: reusable backbones and attention modules
+- `src/tasks/`: Lightning tasks for CV classification, NLP classification, and NER
+- `src/datamodules/`: dataset wrappers for CIFAR-100, SST-2, CoNLL-2003, and OntoNotes 5
+- `configs/`: Hydra configuration groups
+- `scripts/`: convenience scripts for experiment sweeps
+- `train.py`: Hydra entrypoint that composes the config and launches training
 
-### 3. Data Modules (`src/datamodules/`)
-These handle downloading, tokenizing, and wrapping datasets in PyTorch DataLoaders.
-- **`cv_datamodule.py`**: Wraps the `torchvision` CIFAR-100 dataset.
-- **`nlp_datamodule.py`**: Uses HuggingFace's `datasets` and `transformers` to automatically download and tokenize the GLUE SST-2 (Sentence Classification) dataset.
+## Model Families
 
-### 4. Configuration System (`configs/`)
-Everything is assembled powerfully by **Hydra** using hierarchical YAML files. You do not need to modify Python code to change parameters.
-- `configs/config.yaml`: The entry configuration defining defaults.
-- `configs/model/`: Definitions for model dimensions, attention heads, and depth (`vanilla.yaml`, `laplacian.yaml`).
-- `configs/task/`: Hyperparameters like Learning Rate and Optimizers (`cv_classification.yaml`).
-- `configs/datamodule/`: Batch sizes and dataset configurations (`cifar100.yaml`, `sst2.yaml`).
+### Vision
 
----
+- `vision.py` and `vit_wrapper.py`: flat ViT-like baselines
+- `pvt.py`: hierarchical PVT-style backbone with optional RoPE
+- `laplacian_attn.py`: 2D Laplacian attention for vision
+- `rope.py`: 2D rotary positional encoding utilities
 
-## 🚀 Environment Setup 
+Best paper match:
 
-We use `uv`, an extremely fast Python package resolver to manage dependencies.
+- `model=laplacian_pvt_tiny`
+- `model=laplacian_pvt_small`
 
-**1. Install `uv`:**
-- **Windows (PowerShell):** `irm https://astral.sh/uv/install.ps1 | iex`
-- **macOS/Linux:** `curl -LsSf https://astral.sh/uv/install.sh | sh`
+### Text and NER
 
-**2. Sync Environment & Install Dependencies:**
-Navigate to the project root and run:
+- `text.py`: sequence classification backbone
+- `text_ner.py`: token classification backbone for NER
+- `laplacian_attn.py`: 1D Laplacian attention with padding-mask support
+- `vanilla_attn.py`: standard softmax attention baseline
+
+These are project extensions, not part of the original paper reproduction claim.
+
+## Hydra Config Structure
+
+The config tree is now organized by concern:
+
+- `configs/config.yaml`: root composition entrypoint
+- `configs/task/`: task identity and task-level defaults
+- `configs/model/`: architecture presets
+- `configs/datamodule/`: dataset and tokenizer settings
+- `configs/optimizer/`: optimizer presets
+- `configs/trainer/`: Lightning trainer settings
+- `configs/logger/`: logging backend settings
+
+At runtime, the composed config has these top-level groups:
+
+- `task`
+- `model`
+- `datamodule`
+- `optimizer`
+- `trainer`
+- `logger`
+
+Task configs override the default optimizer group through Hydra. For example:
+
+- `task=cv_classification` defaults to `optimizer=adamw_cv_default`
+- `task=ner_task` defaults to `optimizer=adamw_text_default`
+
+You can still override the optimizer explicitly from the CLI.
+
+## Model Presets
+
+### ViT-like Text and NER Presets
+
+Vanilla presets:
+
+- `vanilla_tiny`
+- `vanilla_small`
+- `vanilla_medium`
+
+Laplacian presets:
+
+- `laplacian_tiny`
+- `laplacian_small`
+- `laplacian_medium`
+
+These are the main size-controlled presets for NLP and NER experiments.
+
+### Vision-Oriented Presets
+
+- `vanilla`: legacy ViT-like vanilla baseline
+- `laplacian`: legacy ViT-like Laplacian baseline
+- `laplacian_pvt_tiny`: recommended paper-oriented vision config
+- `laplacian_pvt_small`: larger paper-oriented vision config
+- `laplacian_paper`: reference metadata config, not the best runnable architecture
+
+## Optimizer Presets
+
+The optimizer group currently includes:
+
+- `adamw_cv_default`
+- `adamw_text_default`
+- `adamw_text_high_lr`
+- `adam_text_baseline`
+
+These configs control:
+
+- optimizer type
+- learning rate
+- weight decay
+
+Example:
+
 ```bash
-uv sync
+python train.py task=ner_task model=laplacian_small datamodule=conll2003 optimizer=adam_text_baseline
 ```
-*This will create the virtual environment and install `transformers`, `lightning`, `hydra-core`, `torchmetrics`, `loguru`, etc. based on `pyproject.toml`.*
 
----
+## Environment Setup
 
-## 🏃‍♂️ Running the Experiments
+This project uses a standard Python virtual environment.
 
-By leveraging Hydra, you can launch entirely different task domains purely via command-line arguments. Logs will seamlessly upload to Weights & Biases (W&B).
+Create and activate the environment:
 
-**Run Computer Vision (CIFAR100) with Vanilla Attention:**
 ```bash
-uv run python train.py task=cv_classification model=vanilla datamodule=cifar100
+python -m venv .venv
 ```
-**Run Computer Vision (CIFAR100) with Laplacian Attention:**
+
+On Windows PowerShell:
+
 ```bash
-uv run python train.py task=cv_classification model=laplacian datamodule=cifar100
+.\.venv\Scripts\Activate.ps1
 ```
 
-**Run NLP (SST-2 Sentence Classification) with Laplacian Attention:**
+On macOS or Linux:
+
 ```bash
-uv run python train.py task=nlp_classification model=laplacian datamodule=sst2
+source .venv/bin/activate
 ```
 
-### Advanced Overrides
-Use `+` or `=` to override config nodes. For example, to change batch size, learning rate, and run a fast 1-epoch debug test:
+Install dependencies with:
+
 ```bash
-uv run python train.py task=cv_classification datamodule.batch_size=64 task.lr=1e-4 trainer.max_epochs=1 +trainer.fast_dev_run=true
+python -m pip install --upgrade pip
+pip install -r requirements.txt
 ```
 
----
+## Running Experiments
 
-## 🛠️ How to Extend for New Tasks
+### Computer Vision
 
-The repository is modular. If you want to train on a new Dataset or Task (e.g., Object Detection), follow these steps:
+Legacy ViT-like vanilla baseline:
 
-### 1. Add a New DataModule
-Create a new file (e.g. `src/datamodules/my_new_data.py`).
-1. Make your class inherit from `lightning.LightningDataModule`.
-2. Implement `prepare_data()` (download logic) and `setup()` (splitting subsets).
-3. Return PyTorch dataloaders in `train_dataloader()`, `val_dataloader()`, etc.
-4. **Hydra Config:** Create `configs/datamodule/my_new_data.yaml` defining its parameters (batch size, etc).
-
-### 2. Add a New Backbone (Optional)
-If your task requires different feature representations (e.g. audio spectrograms or point clouds), create `src/models/audio.py` that implements `nn.Module`. Make sure it uses `self.attn = MultiHeadAttention()` vs `self.attn = LaplacianLinearAttention()` controlled via an `attn_type` flag.
-
-### 3. Add a New Task (Lightning Module)
-Create a new file (e.g. `src/tasks/detection.py`).
-1. Make your class inherit from `lightning.LightningModule`.
-2. In `__init__`, conditionally instantiate your backbone and define your task head (e.g., bounding box regressor).
-3. Implement `training_step()` calculating loss and logging metrics. Configure your optimizer natively in `configure_optimizers()`.
-4. **Hydra Config:** Create `configs/task/detection.yaml` with learning rates, optimizer variables, and task-specific logic.
-
-### 4. Register in `train.py`
-Open `train.py`. Under `# 1. Setup DataModule` and `# 2. Setup Task & Model`, add simple `if / elif` conditionals checking `cfg.task.name` to instantiate your newest classes!
-
-```python
-# snippet representing addition to train.py
-elif cfg.task.name == "my_new_task":
-    from src.tasks.detection import MyNewTask
-    task = MyNewTask(...)
+```bash
+python train.py task=cv_classification model=vanilla datamodule=cifar100
 ```
+
+Legacy ViT-like Laplacian baseline:
+
+```bash
+python train.py task=cv_classification model=laplacian datamodule=cifar100
+```
+
+Best paper-oriented vision run:
+
+```bash
+python train.py task=cv_classification model=laplacian_pvt_tiny datamodule=cifar100
+```
+
+### NLP Classification
+
+```bash
+python train.py task=nlp_classification model=laplacian_small datamodule=sst2
+```
+
+### NER
+
+CoNLL-2003 with a vanilla tiny model:
+
+```bash
+python train.py task=ner_task model=vanilla_tiny datamodule=conll2003
+```
+
+OntoNotes 5 with a Laplacian medium model:
+
+```bash
+python train.py task=ner_task model=laplacian_medium datamodule=ontonotes5
+```
+
+### Useful Overrides
+
+Change epochs, precision, or batch size directly from the CLI:
+
+```bash
+python train.py task=ner_task model=laplacian_small datamodule=conll2003 trainer.max_epochs=5 trainer.precision=32-true datamodule.batch_size=16
+```
+
+Override the default optimizer selected by the task:
+
+```bash
+python train.py task=ner_task model=vanilla_small datamodule=ontonotes5 optimizer=adamw_text_high_lr
+```
+
+## Sequential NER Sweep
+
+To run the current NER matrix sequentially across both NER datasets, use:
+
+```bash
+bash scripts/run_ner_model_matrix.sh
+```
+
+The script runs:
+
+- 6 model presets
+- 3 optimizer presets
+- 2 datasets
+
+Current datasets:
+
+- `conll2003`
+- `ontonotes5`
+
+Current model list:
+
+- `vanilla_tiny`
+- `vanilla_small`
+- `vanilla_medium`
+- `laplacian_tiny`
+- `laplacian_small`
+- `laplacian_medium`
+
+Current optimizer list:
+
+- `adamw_text_default`
+- `adamw_text_high_lr`
+- `adam_text_baseline`
+
+The script uses `python train.py` from the active virtual environment, continues after failed runs, and reports any failures at the end.
+
+You can adjust the sweep with environment variables:
+
+```bash
+MAX_EPOCHS=5 ACCELERATOR=gpu DEVICES=1 PRECISION=bf16-mixed WANDB_PROJECT=ner-model-matrix bash scripts/run_ner_model_matrix.sh
+```
+
+Additional Hydra overrides passed to the script are forwarded to every run.
+
+## Notes On Paper Matching
+
+What should be treated as the closest paper match in this repository:
+
+- `PyramidVisionBackbone` from `src/models/pvt.py`
+- `LaplacianLinearAttention` from `src/models/laplacian_attn.py`
+- 2D RoPE from `src/models/rope.py`
+- `model=laplacian_pvt_tiny` or `model=laplacian_pvt_small`
+
+What should not be described as the closest paper reproduction:
+
+- the flat ViT-like `vanilla` and `laplacian` vision configs
+- the NLP and NER extensions
+- `laplacian_paper`, which is now only a reference metadata config
+
+The current implementation is architecture-faithful and method-faithful in plain PyTorch, but it is not a guaranteed exact reproduction of the paper because the original custom CUDA kernels and official training code are not available here.
+
+## Extending The Repo
+
+If you add a new experiment family, keep the same separation of concerns:
+
+- add a new `src/datamodules/*.py` file for data handling
+- add or extend a model in `src/models/`
+- add a task in `src/tasks/`
+- add Hydra presets under the appropriate group in `configs/`
+- wire the new task/datamodule path in `train.py`
+
+That keeps the CLI stable and makes sweep scripts easy to compose.

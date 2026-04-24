@@ -71,23 +71,26 @@ def main(cfg: DictConfig):
 
     # 2. Setup Task & Model
     model_cfg = OmegaConf.to_container(cfg.model, resolve=True)
+    optimizer_name = cfg.optimizer.optimizer
+    lr = cfg.optimizer.lr
+    weight_decay = cfg.optimizer.weight_decay
     
     if cfg.task.name == "cv_classification":
         from src.tasks.classification_cv import CVClassificationTask
         task = CVClassificationTask(
             num_classes=num_classes,
-            lr=cfg.task.lr,
-            weight_decay=cfg.task.weight_decay,
-            optimizer=cfg.task.optimizer,
+            lr=lr,
+            weight_decay=weight_decay,
+            optimizer=optimizer_name,
             model_cfg=model_cfg
         )
     elif cfg.task.name == "nlp_classification":
         from src.tasks.classification_nlp import NLPClassificationTask
         task = NLPClassificationTask(
             num_classes=num_classes,
-            lr=cfg.task.lr,
-            weight_decay=cfg.task.weight_decay,
-            optimizer=cfg.task.optimizer,
+            lr=lr,
+            weight_decay=weight_decay,
+            optimizer=optimizer_name,
             model_cfg=model_cfg,
             vocab_size=len(datamodule.tokenizer),
             max_seq_len=cfg.datamodule.max_length,
@@ -108,16 +111,16 @@ def main(cfg: DictConfig):
 
         task = NERTask(
             num_classes=num_classes,
-            lr=cfg.task.lr,
-            weight_decay=cfg.task.weight_decay,
-            optimizer=cfg.task.optimizer,
+            lr=lr,
+            weight_decay=weight_decay,
+            optimizer=optimizer_name,
             model_cfg=model_cfg,
             vocab_size=len(datamodule.tokenizer),
             max_seq_len=cfg.datamodule.max_length,
             id2label=id2label
         )
 
-    task = torch.compile(task)
+    # task = torch.compile(task)
 
     # 3. Setup Logger
     wandb_logger = WandbLogger(
