@@ -1,0 +1,3 @@
+[submodule "src/LaplacianFormer"]
+	path = src/LaplacianFormer
+	url = https://github.com/Phoenix8215/LaplacianFormer

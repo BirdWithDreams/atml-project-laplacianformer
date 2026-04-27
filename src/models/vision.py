@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from .vanilla_attn import MultiHeadAttention
 from .laplacian_attn import LaplacianLinearAttention
+from .laplacian_fast_attn import FastCudaLaplacianLinearAttention
 
 
 class PatchEmbedding(nn.Module):
@@ -20,7 +21,10 @@ class PatchEmbedding(nn.Module):
 
 
 class ViTBlock(nn.Module):
-    def __init__(self, dim, num_heads, attn_type="vanilla", grid_size=14, attn_kwargs=None):
+    def __init__(
+            self, dim, num_heads, attn_type="vanilla", grid_size=14,
+            attn_kwargs=None, laplacian_backend="torch", laplacian_fallback_to_torch=True
+            ):
         super().__init__()
         self.attn_type = attn_type
         self.grid_size = grid_size
@@ -30,12 +34,22 @@ class ViTBlock(nn.Module):
         if attn_type == "vanilla":
             self.attn = MultiHeadAttention(d_model=dim, num_heads=num_heads)
         elif attn_type == "laplacian":
-            self.attn = LaplacianLinearAttention(
+            if laplacian_backend == "torch":
+                attn_cls = LaplacianLinearAttention
+                backend_kwargs = {}
+            elif laplacian_backend == "cuda":
+                attn_cls = FastCudaLaplacianLinearAttention
+                backend_kwargs = {"fallback_to_torch": laplacian_fallback_to_torch}
+            else:
+                raise ValueError("laplacian_backend must be 'torch' or 'cuda'")
+
+            self.attn = attn_cls(
                 dim=dim,
                 num_heads=num_heads,
                 lambda_scale=attn_kwargs.get("lambda_scale", 4.0),
                 pool_ratio=attn_kwargs.get("pool_ratio", 2),
                 ns_iters=attn_kwargs.get("ns_iters", 5),
+                **backend_kwargs,
             )
             self.cls_norm = nn.LayerNorm(dim)
             # Keep a lightweight CLS-to-token path so the classification token is updated
@@ -83,7 +97,8 @@ class VisionBackbone(nn.Module):
     def __init__(
             self, img_size=224, patch_size=16,
             dim=384, depth=6, num_heads=6, attn_type="vanilla",
-            lambda_scale=4.0, pool_ratio=2, ns_iters=5
+            lambda_scale=4.0, pool_ratio=2, ns_iters=5,
+            laplacian_backend="torch", laplacian_fallback_to_torch=True
             ):
         super().__init__()
         self.patch_embed = PatchEmbedding(img_size, patch_size, 3, dim)
@@ -98,7 +113,11 @@ class VisionBackbone(nn.Module):
 
         self.blocks = nn.ModuleList(
             [
-                ViTBlock(dim, num_heads, attn_type, self.patch_embed.grid_size, attn_kwargs)
+                ViTBlock(
+                    dim, num_heads, attn_type, self.patch_embed.grid_size, attn_kwargs,
+                    laplacian_backend=laplacian_backend,
+                    laplacian_fallback_to_torch=laplacian_fallback_to_torch,
+                )
                 for _ in range(depth)
             ]
         )

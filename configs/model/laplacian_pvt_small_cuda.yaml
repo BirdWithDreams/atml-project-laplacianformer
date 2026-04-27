@@ -1,12 +1,12 @@
-name: "laplacian_pvt_tiny"
+name: "laplacian_pvt_small_cuda"
 backbone_type: "pvt"
 attn_type: "laplacian"
-laplacian_backend: "torch"
-laplacian_fallback_to_torch: true
+laplacian_backend: "cuda"
+laplacian_fallback_to_torch: false
 img_size: 224
 
 embed_dims: [64, 128, 320, 512]
-depths: [2, 2, 2, 2]
+depths: [3, 4, 6, 3]
 num_heads: [1, 2, 5, 8]
 mlp_ratios: [8.0, 8.0, 4.0, 4.0]
 patch_sizes: [7, 3, 3, 3]

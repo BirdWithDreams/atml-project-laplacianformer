@@ -120,7 +120,8 @@ def main(cfg: DictConfig):
             id2label=id2label
         )
 
-    # task = torch.compile(task)
+    if cfg.trainer.get("compile", True):
+        task = torch.compile(task)
 
     # 3. Setup Logger
     wandb_logger = WandbLogger(

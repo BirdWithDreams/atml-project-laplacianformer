@@ -1,6 +1,8 @@
 name: "laplacian_pvt_small"
 backbone_type: "pvt"
 attn_type: "laplacian"
+laplacian_backend: "torch"
+laplacian_fallback_to_torch: true
 img_size: 224
 
 embed_dims: [64, 128, 320, 512]

@@ -33,6 +33,8 @@ class CVClassificationTask(L.LightningModule):
                 lambda_scale=model_cfg.get("lambda_scale", 4.0),
                 pool_ratio=model_cfg.get("pool_ratio", 2),
                 ns_iters=model_cfg.get("ns_iters", 5),
+                laplacian_backend=model_cfg.get("laplacian_backend", "torch"),
+                laplacian_fallback_to_torch=model_cfg.get("laplacian_fallback_to_torch", True),
             )
             dim = model_cfg.get("dim", 384)
         elif backbone_type == "pvt":
@@ -51,6 +53,8 @@ class CVClassificationTask(L.LightningModule):
                 ns_iters=model_cfg.get("ns_iters", 5),
                 use_rope=model_cfg.get("use_rope", True),
                 rope_base=model_cfg.get("rope_base", 10000.0),
+                laplacian_backend=model_cfg.get("laplacian_backend", "torch"),
+                laplacian_fallback_to_torch=model_cfg.get("laplacian_fallback_to_torch", True),
             )
             dim = self.backbone.out_dim
         else:

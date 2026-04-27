@@ -27,6 +27,7 @@ For model-specific architecture notes, see [src/models/README.md](</D:/Studying/
 - `vision.py` and `vit_wrapper.py`: flat ViT-like baselines
 - `pvt.py`: hierarchical PVT-style backbone with optional RoPE
 - `laplacian_attn.py`: 2D Laplacian attention for vision
+- `laplacian_fast_attn.py`: optional CUDA-backed Laplacian attention fast path
 - `rope.py`: 2D rotary positional encoding utilities
 
 Best paper match:
@@ -95,6 +96,8 @@ These are the main size-controlled presets for NLP and NER experiments.
 - `laplacian`: legacy ViT-like Laplacian baseline
 - `laplacian_pvt_tiny`: recommended paper-oriented vision config
 - `laplacian_pvt_small`: larger paper-oriented vision config
+- `laplacian_pvt_tiny_cuda`: same tiny PVT config with the authors' CUDA kernels enabled
+- `laplacian_pvt_small_cuda`: same small PVT config with the authors' CUDA kernels enabled
 - `laplacian_paper`: reference metadata config, not the best runnable architecture
 
 ## Optimizer Presets
@@ -168,6 +171,14 @@ Best paper-oriented vision run:
 ```bash
 python train.py task=cv_classification model=laplacian_pvt_tiny datamodule=cifar100
 ```
+
+CUDA-backed PVT run after building `src/LaplacianFormer`:
+
+```bash
+python train.py task=cv_classification model=laplacian_pvt_tiny_cuda datamodule=cifar100 trainer.precision=16-mixed trainer.compile=false
+```
+
+See [docs/laplacian_cuda_server.md](</D:/Studying/USI MAI/atml-project/docs/laplacian_cuda_server.md:1>) for GB10 server setup and extension build instructions.
 
 ### NLP Classification
 
@@ -255,6 +266,7 @@ What should be treated as the closest paper match in this repository:
 - `LaplacianLinearAttention` from `src/models/laplacian_attn.py`
 - 2D RoPE from `src/models/rope.py`
 - `model=laplacian_pvt_tiny` or `model=laplacian_pvt_small`
+- `model=laplacian_pvt_tiny_cuda` or `model=laplacian_pvt_small_cuda` when the authors' CUDA extension is built and benchmarked
 
 What should not be described as the closest paper reproduction:
 
@@ -262,7 +274,7 @@ What should not be described as the closest paper reproduction:
 - the NLP and NER extensions
 - `laplacian_paper`, which is now only a reference metadata config
 
-The current implementation is architecture-faithful and method-faithful in plain PyTorch, but it is not a guaranteed exact reproduction of the paper because the original custom CUDA kernels and official training code are not available here.
+The default implementation is architecture-faithful and method-faithful in plain PyTorch. The optional CUDA backend now uses the authors' custom kernels for the heavy Laplacian pieces, but it still needs server-side build and benchmark validation and is not a guarantee that the full official training recipe is reproduced.
 
 ## Extending The Repo
 

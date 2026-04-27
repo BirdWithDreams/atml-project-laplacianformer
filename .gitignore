@@ -1,7 +1,11 @@
 .idea
 wandb
 data
+.env
+__pycache__/
+*.py[cod]
 
 *.txt
 outputs
 checkpoints
+src/LaplacianFormer/build/

@@ -10,6 +10,8 @@ The important distinction is that not every model in this directory is meant to 
 ## Directory Map
 
 - `laplacian_attn.py`: Laplacian attention implementations for vision (2D) and text (1D).
+- `laplacian_fast_attn.py`: optional CUDA-backed 2D Laplacian attention using the authors' custom operators.
+- `laplacian_cuda_ops.py`: low-level Python/autograd wrappers for `src/LaplacianFormer`.
 - `vanilla_attn.py`: standard softmax Transformer components used as a reference baseline.
 - `rope.py`: 2D rotary positional embedding utilities for vision attention.
 - `pvt.py`: hierarchical PVT-style vision backbone with optional RoPE and either Laplacian or vanilla attention.
@@ -36,6 +38,16 @@ For vision, `LaplacianLinearAttention` works on spatial tokens and uses:
 For NLP, `LaplacianLinearAttention1D` reuses the same idea in sequence form and now supports padding-aware masking.
 
 This file is the closest implementation of the paper's main methodological contribution.
+
+### `laplacian_fast_attn.py`
+
+This is an optional fast path for the 2D vision attention. It keeps the same
+forward interface as `LaplacianLinearAttention`, but delegates the expensive
+L1-distance and Newton-inverse pieces to the authors' CUDA extension when
+`laplacian_backend: "cuda"` is selected.
+
+The pure PyTorch backend remains the default. For server setup and GB10 build
+instructions, see `docs/laplacian_cuda_server.md`.
 
 ### `vanilla_attn.py`
 
@@ -116,6 +128,7 @@ In practice, that means:
 
 - `configs/model/laplacian_pvt_tiny.yaml` is the default best-match reference config
 - `configs/model/laplacian_pvt_small.yaml` is the larger paper-aligned variant
+- `configs/model/laplacian_pvt_tiny_cuda.yaml` and `laplacian_pvt_small_cuda.yaml` use the same architecture with the CUDA backend enabled
 
 These should be preferred when we describe results as the closest reproduction of the paper available in this codebase.
 
@@ -140,6 +153,7 @@ What it matches well:
 What still differs from a perfect reproduction:
 
 - the implementation is plain PyTorch, not custom CUDA kernels
+- the CUDA backend uses the authors' kernels, but still needs server-side build and benchmark validation
 - we do not have the authors' official code
 - the exact training recipe and optimization details may still differ from the paper
 
