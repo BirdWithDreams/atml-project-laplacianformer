@@ -1,3 +1,7 @@
 [submodule "libs/laplacianformer"]
 	path = libs/laplacianformer
 	url = https://github.com/phoenix8215/laplacianformer.git
+
+[submodule "src/LaplacianFormer"]
+	path = src/LaplacianFormer
+	url = https://github.com/Phoenix8215/LaplacianFormer
