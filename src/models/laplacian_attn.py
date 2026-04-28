@@ -19,35 +19,39 @@ class NewtonSchulzInverse(nn.Module):
     def forward(self, W: torch.Tensor) -> torch.Tensor:
         # W shape: (B, H, m, m)
         orig_dtype = W.dtype
-        W = W.float()
-        B, H, m, _ = W.shape
-        I = torch.eye(m, device=W.device, dtype=W.dtype).view(1, 1, m, m)
+        device_type = W.device.type
 
-        # Add small diagonal perturbation for strictly positive definite constraint [cite: 246]
-        W_eps = W + self.eps * I
+        # Keep the inverse solve in fp32 even under mixed precision autocast.
+        with torch.amp.autocast(device_type=device_type, enabled=False):
+            W = W.float()
+            B, H, m, _ = W.shape
+            I = torch.eye(m, device=W.device, dtype=W.dtype).view(1, 1, m, m)
 
-        # Initialize scaling factor alpha = 2 / ||W||_2 [cite: 247]
-        # Using Frobenius norm as a differentiable proxy for spectral norm
-        alpha = 2.0 / (torch.linalg.norm(W_eps, dim=(-2, -1), keepdim=True) + 1e-8)
+            # Add small diagonal perturbation for strictly positive definite constraint [cite: 246]
+            W_eps = W + self.eps * I
 
-        # Initialize X_0 = alpha * W^T [cite: 248]
-        X = alpha * W_eps.transpose(-2, -1)
+            # Initialize scaling factor alpha = 2 / ||W||_2 [cite: 247]
+            # Using Frobenius norm as a differentiable proxy for spectral norm
+            alpha = 2.0 / (torch.linalg.norm(W_eps, dim=(-2, -1), keepdim=True) + 1e-8)
 
-        # Iterative update: X_{k+1} = X_k (2I - W X_k) [cite: 252]
-        for _ in range(self.num_iters):
-            X = X @ (2 * I - W_eps @ X)
+            # Initialize X_0 = alpha * W^T [cite: 248]
+            X = alpha * W_eps.transpose(-2, -1)
 
-        residual = torch.linalg.norm(I - W_eps @ X, dim=(-2, -1))
-        invalid = (
-            ~torch.isfinite(X).all(dim=(-2, -1))
-            | ~torch.isfinite(residual)
-            | (residual > 1.0)
-        )
+            # Iterative update: X_{k+1} = X_k (2I - W X_k) [cite: 252]
+            for _ in range(self.num_iters):
+                X = X @ (2 * I - W_eps @ X)
 
-        if invalid.any():
-            X = X.clone()
-            invalid_w = W_eps[invalid]
-            X[invalid] = torch.linalg.pinv(invalid_w)
+            residual = torch.linalg.norm(I - W_eps @ X, dim=(-2, -1))
+            invalid = (
+                ~torch.isfinite(X).all(dim=(-2, -1))
+                | ~torch.isfinite(residual)
+                | (residual > 1.0)
+            )
+
+            if invalid.any():
+                X = X.clone()
+                invalid_w = W_eps[invalid]
+                X[invalid] = torch.linalg.pinv(invalid_w).to(dtype=X.dtype)
 
         return X.to(orig_dtype)
 
