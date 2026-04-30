@@ -3,7 +3,7 @@
 This project has two Laplacian attention backends:
 
 - `laplacian_backend: "torch"`: the existing pure PyTorch implementation.
-- `laplacian_backend: "cuda"`: a fast path that calls the authors' custom CUDA kernels from `src/LaplacianFormer`.
+- `laplacian_backend: "cuda"`: a fast path that calls the authors' custom CUDA kernels from `libs/laplacianformer`.
 
 The CUDA backend is currently wired for the paper-oriented vision path, especially the PVT configs. The ready-to-run configs are:
 
@@ -23,6 +23,15 @@ python3 --version
 ```
 
 Expected GPU capability for NVIDIA GB10 is `12.1`. The CUDA toolkit should be CUDA 13.x for the cleanest GB10 build.
+
+If `nvcc --version` fails, the CUDA toolkit is not visible in your shell yet. On a module-based cluster, load the CUDA module first, for example:
+
+```bash
+module avail cuda
+module load cuda/13.0
+```
+
+The exact module name is cluster-specific. A CUDA-enabled PyTorch wheel is not enough for `setup.py build_ext`; building the extension also needs the toolkit root, headers, libraries, and `nvcc`.
 
 ## 2. Create An Environment
 
@@ -76,13 +85,34 @@ PY
 
 ## 3. Build The Authors' Extension
 
-Build from the extension directory:
+Build from the extension directory used by this repository's Python wrapper:
 
 ```bash
-cd src/LaplacianFormer
+cd libs/laplacianformer
+if [ -z "${CUDA_HOME:-}" ] && command -v nvcc >/dev/null 2>&1; then
+  export CUDA_HOME="$(dirname "$(dirname "$(command -v nvcc)")")"
+fi
+export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-13.0}"
+export PATH="$CUDA_HOME/bin:$PATH"
+export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
 export TORCH_CUDA_ARCH_LIST="12.1"
 python setup.py build_ext --inplace
 cd ../..
+```
+
+Before rerunning the build, this quick check should print non-empty `CUDA_HOME` and `nvcc` paths:
+
+```bash
+python - <<'PY'
+import shutil
+import torch
+from torch.utils.cpp_extension import CUDA_HOME
+
+print("torch:", torch.__version__)
+print("torch cuda:", torch.version.cuda)
+print("CUDA_HOME:", CUDA_HOME)
+print("nvcc:", shutil.which("nvcc"))
+PY
 ```
 
 If `12.1` is rejected by your installed CUDA/PyTorch toolchain, upgrade to a CUDA 13.x toolkit and a CUDA 13 PyTorch wheel first. GB10 is `sm_121`, so building with an older toolkit is the most likely source of architecture errors.
@@ -190,7 +220,8 @@ For quick timing, add `trainer.max_epochs=1` and keep the same batch size in bot
 
 ## Troubleshooting
 
-- `No module named Laplace_subtraction_cuda`: build the extension in `src/LaplacianFormer` with `python setup.py build_ext --inplace`.
+- `CUDA_HOME environment variable is not set`: load the server CUDA toolkit module or export `CUDA_HOME` to the toolkit root before building. `nvcc --version` must work in the same activated environment where you run `python setup.py build_ext --inplace`.
+- `No module named Laplace_subtraction_cuda`: build the extension in `libs/laplacianformer` with `python setup.py build_ext --inplace`.
 - `no kernel image is available`: rebuild with `TORCH_CUDA_ARCH_LIST="12.1"` on the GB10 server.
 - `Got torch.bfloat16`: use `trainer.precision=16-mixed` or `trainer.precision=32-true`.
 - `NewtonInverse CUDA path does not support N=...`: the authors' kernel supports landmark matrices up to `N <= 128`; the provided PVT configs stay within that.

@@ -1,5 +1,6 @@
 import hydra
 from omegaconf import DictConfig, OmegaConf
+from hydra.core.hydra_config import HydraConfig
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger
 from loguru import logger
@@ -28,6 +29,37 @@ class InterceptHandler(logging.Handler):
 def setup_loguru():
     logging.basicConfig(handlers=[InterceptHandler()], level=logging.INFO, force=True)
     logger.configure(handlers=[{"sink": sys.stdout, "level": "INFO"}])
+
+
+def build_wandb_tags(cfg: DictConfig) -> list[str]:
+    automatic_tags = []
+
+    if HydraConfig.initialized():
+        choices = HydraConfig.get().runtime.choices
+        for group_name in ("task", "model", "datamodule", "optimizer", "trainer"):
+            choice = choices.get(group_name)
+            if choice:
+                automatic_tags.append(f"{group_name}:{choice}")
+
+    # Fall back to explicit config names for contexts where Hydra runtime
+    # choices are unavailable, such as direct unit tests.
+    for group_name in ("task", "model", "datamodule", "optimizer"):
+        group_cfg = cfg.get(group_name)
+        group_value = group_cfg.get("name") if group_cfg is not None else None
+        if group_value:
+            automatic_tags.append(f"{group_name}:{group_value}")
+
+    extra_tags = cfg.logger.get("extra_tags", [])
+    tags = []
+    seen = set()
+    for tag in [*automatic_tags, *extra_tags]:
+        tag = str(tag).strip()
+        if tag and tag not in seen:
+            tags.append(tag)
+            seen.add(tag)
+
+    return tags
+
 
 @hydra.main(version_base="1.3", config_path="configs", config_name="config")
 def main(cfg: DictConfig):
@@ -64,6 +96,24 @@ def main(cfg: DictConfig):
             batch_size=cfg.datamodule.batch_size,
             num_workers=cfg.datamodule.num_workers,
             max_length=cfg.datamodule.max_length
+        )
+        num_classes = cfg.datamodule.num_classes
+    elif cfg.task.name == "semantic_segmentation":
+        from src.datamodules.segmentation_datamodule import SegmentationDataModule
+        datamodule = SegmentationDataModule(
+            data_dir=cfg.datamodule.get("data_dir", "./data"),
+            dataset_name=cfg.datamodule.dataset_name,
+            batch_size=cfg.datamodule.batch_size,
+            num_workers=cfg.datamodule.num_workers,
+            image_size=cfg.model.get("img_size", cfg.datamodule.get("image_size", 224)),
+            num_classes=cfg.datamodule.num_classes,
+            ignore_index=cfg.datamodule.get("ignore_index", 255),
+            download=cfg.datamodule.get("download", True),
+            coco_year=cfg.datamodule.get("coco_year", "2017"),
+            max_train_samples=cfg.datamodule.get("max_train_samples", None),
+            max_val_samples=cfg.datamodule.get("max_val_samples", None),
+            max_test_samples=cfg.datamodule.get("max_test_samples", None),
+            subset_seed=cfg.datamodule.get("subset_seed", cfg.seed),
         )
         num_classes = cfg.datamodule.num_classes
     else:
@@ -119,14 +169,27 @@ def main(cfg: DictConfig):
             max_seq_len=cfg.datamodule.max_length,
             id2label=id2label
         )
+    elif cfg.task.name == "semantic_segmentation":
+        from src.tasks.segmentation import SemanticSegmentationTask
+        task = SemanticSegmentationTask(
+            num_classes=num_classes,
+            lr=lr,
+            weight_decay=weight_decay,
+            optimizer=optimizer_name,
+            model_cfg=model_cfg,
+            ignore_index=cfg.datamodule.get("ignore_index", 255),
+        )
 
     if cfg.trainer.get("compile", True):
         task = torch.compile(task)
 
     # 3. Setup Logger
+    wandb_tags = build_wandb_tags(cfg)
+    logger.info(f"Using W&B tags: {wandb_tags}")
     wandb_logger = WandbLogger(
         project=cfg.logger.project,
         name=cfg.logger.name,
+        tags=wandb_tags,
         config=OmegaConf.to_container(cfg, resolve=True)
     )
 

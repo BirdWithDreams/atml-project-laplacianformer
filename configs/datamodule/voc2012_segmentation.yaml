@@ -1,0 +1,15 @@
+name: "voc2012_segmentation"
+dataset_name: "voc2012"
+data_dir: "./data"
+batch_size: 16
+num_workers: 4
+image_size: 224
+num_classes: 21
+ignore_index: 255
+download: true
+
+# Keep first experiments small and fast; set to null for full VOC 2012.
+max_train_samples: 512
+max_val_samples: 128
+max_test_samples: 128
+subset_seed: 42

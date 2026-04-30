@@ -14,7 +14,8 @@ import torch
 
 
 _EXTENSION_NAME = "Laplace_subtraction_cuda"
-_EXTENSION_DIR = Path(__file__).resolve().parents[1] / "LaplacianFormer"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_EXTENSION_DIR = _REPO_ROOT / "libs" / "laplacianformer"
 _SUPPORTED_LAPLACE_DTYPES = {torch.float16, torch.float32, torch.float64}
 
 _EXTENSION = None
@@ -51,7 +52,7 @@ def extension_diagnostics() -> str:
         detail = f"{type(_IMPORT_ERROR).__name__}: {_IMPORT_ERROR}" if _IMPORT_ERROR else "not imported"
         return (
             f"{_EXTENSION_NAME} is unavailable ({detail}). Build it with "
-            "`cd src/LaplacianFormer && python setup.py build_ext --inplace`."
+            "`cd libs/laplacianformer && python setup.py build_ext --inplace`."
         )
 
     try:

@@ -1,2 +1,3 @@
 project: "laplacian-vs-vanilla"
 name: "${task.name}_${model.name}_${datamodule.name}_${optimizer.name}"
+extra_tags: []

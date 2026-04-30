@@ -11,10 +11,11 @@ The important distinction is that not every model in this directory is meant to 
 
 - `laplacian_attn.py`: Laplacian attention implementations for vision (2D) and text (1D).
 - `laplacian_fast_attn.py`: optional CUDA-backed 2D Laplacian attention using the authors' custom operators.
-- `laplacian_cuda_ops.py`: low-level Python/autograd wrappers for `src/LaplacianFormer`.
+- `laplacian_cuda_ops.py`: low-level Python/autograd wrappers for `libs/laplacianformer`.
 - `vanilla_attn.py`: standard softmax Transformer components used as a reference baseline.
 - `rope.py`: 2D rotary positional embedding utilities for vision attention.
 - `pvt.py`: hierarchical PVT-style vision backbone with optional RoPE and either Laplacian or vanilla attention.
+- `segmentation.py`: PVT-based semantic segmentation decoder for dense prediction experiments.
 - `vision.py`: legacy single-stage ViT-like vision backbone.
 - `vit_wrapper.py`: alternative ViT-style wrapper that mirrors the same block logic.
 - `text.py`: text classification backbone.
@@ -77,6 +78,8 @@ Its structure is:
 4. Repeat for 4 pyramid stages.
 5. Mean pool the final-stage features for classification.
 
+The backbone also exposes `forward_feature_maps()` for dense prediction tasks. This keeps classification unchanged while allowing segmentation decoders to reuse the stage-wise spatial maps.
+
 Each `PyramidBlock` can use either:
 
 - Laplacian attention, or
@@ -102,6 +105,10 @@ They are still useful for:
 - ablation studies against the newer PVT path
 
 But they are not the best paper match because they differ from the paper's hierarchical PVT-style design. They should be described as paper-inspired baselines rather than reproductions.
+
+### `segmentation.py`: PVT Segmentation Decoder
+
+`PyramidSegmentationModel` reuses the PVT backbone feature maps, projects all stages to a shared decoder width, fuses them at the highest backbone resolution, and upsamples logits back to the input image size. It supports the same vanilla or Laplacian attention choices as the PVT classification path.
 
 ## NLP Backbones
 

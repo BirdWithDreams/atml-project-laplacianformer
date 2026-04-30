@@ -1,0 +1,6 @@
+# @package _global_
+defaults:
+  - override /optimizer: adamw_cv_default
+
+task:
+  name: "semantic_segmentation"

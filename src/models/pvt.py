@@ -222,10 +222,17 @@ class PyramidVisionBackbone(nn.Module):
             self.stages.append(stage)
             current_channels = embed_dim
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward_feature_maps(self, x: torch.Tensor) -> list[torch.Tensor]:
+        features = []
         for stage_index, stage in enumerate(self.stages):
             x, height, width = stage(x)
+            feature_map = x.transpose(1, 2).reshape(x.shape[0], x.shape[-1], height, width)
+            features.append(feature_map)
             if stage_index < len(self.stages) - 1:
-                x = x.transpose(1, 2).reshape(x.shape[0], x.shape[-1], height, width)
+                x = feature_map
 
-        return x.mean(dim=1)
+        return features
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        features = self.forward_feature_maps(x)
+        return features[-1].flatten(2).mean(dim=-1)

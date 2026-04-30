@@ -5,7 +5,7 @@ This repository is a research codebase for comparing standard softmax attention 
 The project now serves two purposes:
 
 - paper-oriented computer vision experiments
-- extension experiments in NLP and NER
+- extension experiments in NLP, NER, and semantic segmentation
 
 The current best paper match is the PVT-style vision backbone with RoPE and Laplacian attention. The older ViT-like vision models and the NLP/NER models are still useful, but they should be treated as baselines or extensions rather than as the closest reproduction of the paper.
 
@@ -14,8 +14,8 @@ For model-specific architecture notes, see [src/models/README.md](</D:/Studying/
 ## Project Layout
 
 - `src/models/`: reusable backbones and attention modules
-- `src/tasks/`: Lightning tasks for CV classification, NLP classification, and NER
-- `src/datamodules/`: dataset wrappers for CIFAR-100, SST-2, CoNLL-2003, and OntoNotes 5
+- `src/tasks/`: Lightning tasks for CV classification, NLP classification, NER, and semantic segmentation
+- `src/datamodules/`: dataset wrappers for CIFAR-100, SST-2, CoNLL-2003, OntoNotes 5, VOC 2012, and COCO
 - `configs/`: Hydra configuration groups
 - `scripts/`: convenience scripts for experiment sweeps
 - `train.py`: Hydra entrypoint that composes the config and launches training
@@ -26,6 +26,7 @@ For model-specific architecture notes, see [src/models/README.md](</D:/Studying/
 
 - `vision.py` and `vit_wrapper.py`: flat ViT-like baselines
 - `pvt.py`: hierarchical PVT-style backbone with optional RoPE
+- `segmentation.py`: lightweight PVT segmentation decoder
 - `laplacian_attn.py`: 2D Laplacian attention for vision
 - `laplacian_fast_attn.py`: optional CUDA-backed Laplacian attention fast path
 - `rope.py`: 2D rotary positional encoding utilities
@@ -172,7 +173,7 @@ Best paper-oriented vision run:
 python train.py task=cv_classification model=laplacian_pvt_tiny datamodule=cifar100
 ```
 
-CUDA-backed PVT run after building `src/LaplacianFormer`:
+CUDA-backed PVT run after building `libs/laplacianformer`:
 
 ```bash
 python train.py task=cv_classification model=laplacian_pvt_tiny_cuda datamodule=cifar100 trainer.precision=16-mixed trainer.compile=false
@@ -200,6 +201,22 @@ OntoNotes 5 with a Laplacian medium model:
 python train.py task=ner_task model=laplacian_medium datamodule=ontonotes5
 ```
 
+### Semantic Segmentation
+
+PASCAL VOC 2012 subset with a Laplacian PVT decoder:
+
+```bash
+python train.py task=semantic_segmentation model=laplacian_pvt_segmentation_tiny datamodule=voc2012_segmentation trainer.compile=false
+```
+
+MS COCO 2017 subset with the same task path:
+
+```bash
+python train.py task=semantic_segmentation model=laplacian_pvt_segmentation_tiny datamodule=coco_segmentation trainer.compile=false
+```
+
+COCO expects the standard local layout under `./data/coco`: `train2017`, `val2017`, and `annotations/instances_{train,val}2017.json`. Both segmentation datamodule configs default to small subsets; set `datamodule.max_train_samples=null datamodule.max_val_samples=null` for full splits.
+
 ### Useful Overrides
 
 Change epochs, precision, or batch size directly from the CLI:
@@ -213,6 +230,14 @@ Override the default optimizer selected by the task:
 ```bash
 python train.py task=ner_task model=vanilla_small datamodule=ontonotes5 optimizer=adamw_text_high_lr
 ```
+
+Add custom W&B tags while keeping the automatic config-name tags:
+
+```bash
+python train.py task=cv_classification model=laplacian_pvt_tiny datamodule=cifar100 logger.extra_tags='[ablation, smoke]'
+```
+
+Every run is tagged automatically with the selected config groups, for example `task:cv_classification`, `model:laplacian_pvt_tiny`, `datamodule:cifar100`, and `optimizer:adamw_cv_default`. Use `logger.extra_tags` for free-form labels.
 
 ## Sequential NER Sweep
 
