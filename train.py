@@ -182,7 +182,8 @@ def main(cfg: DictConfig):
         project=cfg.logger.project,
         name=cfg.logger.name,
         tags=wandb_tags,
-        config=OmegaConf.to_container(cfg, resolve=True)
+        config=OmegaConf.to_container(cfg, resolve=True),
+        save_dir=cfg.logger.save_dir,
     )
 
     # 4. Setup Trainer
