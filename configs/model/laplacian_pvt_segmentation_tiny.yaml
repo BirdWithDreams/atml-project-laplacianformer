@@ -1,7 +1,7 @@
 name: "laplacian_pvt_segmentation_tiny"
 backbone_type: "pvt"
 attn_type: "laplacian"
-laplacian_backend: "torch"
+laplacian_backend: "cuda"
 laplacian_fallback_to_torch: true
 img_size: 224
 

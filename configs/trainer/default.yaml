@@ -1,6 +1,6 @@
 max_epochs: 30
 accelerator: "gpu"
 devices: 1
-precision: "bf16-mixed"
+precision: 32
 log_every_n_steps: 10
-compile: true
+compile: false
