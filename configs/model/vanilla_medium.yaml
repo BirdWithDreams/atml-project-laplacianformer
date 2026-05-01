@@ -1,5 +1,0 @@
-name: "vanilla_medium"
-attn_type: "vanilla"
-dim: 512
-depth: 8
-num_heads: 8

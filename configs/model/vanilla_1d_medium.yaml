@@ -1,4 +1,4 @@
-name: "vanilla"
+name: "vanilla_1d_medium"
 attn_type: "vanilla"
 dim: 384
 depth: 6

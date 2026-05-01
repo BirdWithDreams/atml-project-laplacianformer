@@ -9,7 +9,7 @@ ignore_index: 255
 download: true
 
 # Keep first experiments small and fast; set to null for full VOC 2012.
-max_train_samples: 512
-max_val_samples: 128
-max_test_samples: 128
+max_train_samples: null
+max_val_samples: null
+max_test_samples: null
 subset_seed: 42

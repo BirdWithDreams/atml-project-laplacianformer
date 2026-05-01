@@ -5,10 +5,10 @@ This project has two Laplacian attention backends:
 - `laplacian_backend: "torch"`: the existing pure PyTorch implementation.
 - `laplacian_backend: "cuda"`: a fast path that calls the authors' custom CUDA kernels from `libs/laplacianformer`.
 
-The CUDA backend is currently wired for the paper-oriented vision path, especially the PVT configs. The ready-to-run configs are:
+The CUDA backend is wired for the image PVT configs. The ready-to-run configs are:
 
-- `model=laplacian_pvt_tiny_cuda`
 - `model=laplacian_pvt_small_cuda`
+- `model=laplacian_pvt_medium_cuda`
 
 These configs set `laplacian_fallback_to_torch: false`, so a missing extension, unsupported dtype, or unsupported GPU target fails loudly instead of silently falling back.
 
@@ -170,16 +170,17 @@ PY
 
 ## 5. Run Training
 
-Important: the authors' Laplace subtraction kernel supports `float16`, `float32`, and `float64`, but not `bfloat16`. Start with `16-mixed` or `32-true`, not `bf16-mixed`.
+Important: the authors' Laplace subtraction kernel does not support `bfloat16`.
+Use `trainer.precision=32` for these configs.
 
 Recommended first run:
 
 ```bash
 python train.py \
   task=cv_classification \
-  model=laplacian_pvt_tiny_cuda \
+  model=laplacian_pvt_small_cuda \
   datamodule=cifar100 \
-  trainer.precision=16-mixed \
+  trainer.precision=32 \
   trainer.compile=false
 ```
 
@@ -190,29 +191,29 @@ For the larger model:
 ```bash
 python train.py \
   task=cv_classification \
-  model=laplacian_pvt_small_cuda \
+  model=laplacian_pvt_medium_cuda \
   datamodule=cifar100 \
-  trainer.precision=16-mixed \
+  trainer.precision=32 \
   trainer.compile=false
 ```
 
-## 6. Compare Against The PyTorch Backend
+## 6. Compare Against Vanilla PVT
 
-Use the same training settings and switch only the model config:
+Use the same training settings and switch only the attention family:
 
 ```bash
 python train.py \
   task=cv_classification \
-  model=laplacian_pvt_tiny \
+  model=vanilla_pvt_small \
   datamodule=cifar100 \
-  trainer.precision=16-mixed \
+  trainer.precision=32 \
   trainer.compile=false
 
 python train.py \
   task=cv_classification \
-  model=laplacian_pvt_tiny_cuda \
+  model=laplacian_pvt_small_cuda \
   datamodule=cifar100 \
-  trainer.precision=16-mixed \
+  trainer.precision=32 \
   trainer.compile=false
 ```
 
@@ -223,6 +224,6 @@ For quick timing, add `trainer.max_epochs=1` and keep the same batch size in bot
 - `CUDA_HOME environment variable is not set`: load the server CUDA toolkit module or export `CUDA_HOME` to the toolkit root before building. `nvcc --version` must work in the same activated environment where you run `python setup.py build_ext --inplace`.
 - `No module named Laplace_subtraction_cuda`: build the extension in `libs/laplacianformer` with `python setup.py build_ext --inplace`.
 - `no kernel image is available`: rebuild with `TORCH_CUDA_ARCH_LIST="12.1"` on the GB10 server.
-- `Got torch.bfloat16`: use `trainer.precision=16-mixed` or `trainer.precision=32-true`.
+- `Got torch.bfloat16`: use `trainer.precision=32`.
 - `NewtonInverse CUDA path does not support N=...`: the authors' kernel supports landmark matrices up to `N <= 128`; the provided PVT configs stay within that.
 - `torch.compile` errors: rerun with `trainer.compile=false`.

@@ -1,6 +1,8 @@
 # @package _global_
 defaults:
   - override /optimizer: adamw_text_default
+  - override /model: vanilla_1d_small
+  - override /datamodule: sst2
 
 task:
   name: "nlp_classification"

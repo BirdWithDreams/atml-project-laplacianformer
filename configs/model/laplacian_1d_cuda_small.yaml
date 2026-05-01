@@ -1,4 +1,4 @@
-name: "laplacian_1d_cuda_tiny"
+name: "laplacian_1d_cuda_small"
 attn_type: "laplacian"
 laplacian_backend: "cuda_1d"
 laplacian_fallback_to_torch: false

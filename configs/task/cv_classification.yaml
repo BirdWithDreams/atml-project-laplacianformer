@@ -1,6 +1,8 @@
 # @package _global_
 defaults:
   - override /optimizer: adamw_cv_default
+  - override /model: vanilla_pvt_small
+  - override /datamodule: cifar100
 
 task:
   name: "cv_classification"

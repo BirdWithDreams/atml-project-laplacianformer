@@ -3,8 +3,8 @@ defaults:
   - optimizer: adamw_cv_default
   - trainer: default
   - logger: wandb
-  - task: cv_classification
-  - model: vanilla
+  - model: vanilla_pvt_small
   - datamodule: cifar100
+  - task: cv_classification
 
 seed: 42

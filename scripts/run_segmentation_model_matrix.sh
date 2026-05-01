@@ -6,28 +6,26 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
 DEFAULT_MODELS=(
-  vanilla_1d_small
-  vanilla_1d_medium
-  laplacian_1d_cuda_small
-  laplacian_1d_cuda_medium
+  vanilla_pvt_small
+  vanilla_pvt_medium
+  laplacian_pvt_small_cuda
+  laplacian_pvt_medium_cuda
 )
 
 DEFAULT_OPTIMIZERS=(
-  adamw_text_default
-  adamw_text_high_lr
-  adam_text_baseline
+  adamw_cv_default
 )
 
 DEFAULT_DATASETS=(
-  conll2003
-  ontonotes5
+  voc2012_segmentation
+  coco_segmentation
 )
 
 ACCELERATOR="${ACCELERATOR:-gpu}"
 DEVICES="${DEVICES:-1}"
 PRECISION="${PRECISION:-32}"
-WANDB_PROJECT="${WANDB_PROJECT:-ner-model-matrix}"
 COMPILE="${COMPILE:-false}"
+WANDB_PROJECT="${WANDB_PROJECT:-segmentation-model-matrix}"
 
 if [ -n "${MODELS:-}" ]; then
   read -r -a MODEL_LIST <<< "${MODELS}"
@@ -61,13 +59,13 @@ FAILED_RUNS=()
 for dataset in "${DATASET_LIST[@]}"; do
   for optimizer in "${OPTIMIZER_LIST[@]}"; do
     for model in "${MODEL_LIST[@]}"; do
-      run_name="ner_${dataset}_${model}_${optimizer}"
+      run_name="seg_${dataset}_${model}_${optimizer}"
       echo "================================================================"
       echo "Starting ${run_name}"
       echo "================================================================"
 
       if ! "${TRAIN_CMD_LIST[@]}" train.py \
-        task=ner_task \
+        task=semantic_segmentation \
         datamodule="${dataset}" \
         model="${model}" \
         optimizer="${optimizer}" \
@@ -93,4 +91,4 @@ if [ "${#FAILED_RUNS[@]}" -gt 0 ]; then
 fi
 
 echo
-echo "All NER runs completed successfully."
+echo "All segmentation runs completed successfully."

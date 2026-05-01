@@ -1,6 +1,8 @@
 # @package _global_
 defaults:
   - override /optimizer: adamw_cv_default
+  - override /model: laplacian_pvt_small_cuda
+  - override /datamodule: voc2012_segmentation
 
 task:
   name: "semantic_segmentation"

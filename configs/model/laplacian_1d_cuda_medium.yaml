@@ -1,7 +1,7 @@
-name: "laplacian"
+name: "laplacian_1d_cuda_medium"
 attn_type: "laplacian"
-img_size: 224
-patch_size: 16
+laplacian_backend: "cuda_1d"
+laplacian_fallback_to_torch: false
 dim: 384
 depth: 6
 num_heads: 6

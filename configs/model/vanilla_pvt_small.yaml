@@ -1,8 +1,6 @@
-name: "vanilla_pvt_segmentation_tiny"
+name: "vanilla_pvt_small"
 backbone_type: "pvt"
 attn_type: "vanilla"
-laplacian_backend: "torch"
-laplacian_fallback_to_torch: true
 img_size: 224
 
 embed_dims: [64, 128, 320, 512]

@@ -14,7 +14,7 @@ coco_year: "2017"
 # ./data/coco/val2017
 # ./data/coco/annotations/instances_train2017.json
 # ./data/coco/annotations/instances_val2017.json
-max_train_samples: 2048
-max_val_samples: 256
-max_test_samples: 256
+max_train_samples: null
+max_val_samples: null
+max_test_samples: null
 subset_seed: 42
