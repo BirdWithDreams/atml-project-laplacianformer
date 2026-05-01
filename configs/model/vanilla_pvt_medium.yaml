@@ -3,8 +3,8 @@ backbone_type: "pvt"
 attn_type: "vanilla"
 img_size: 224
 
-embed_dims: [64, 128, 320, 512]
-depths: [3, 4, 6, 3]
+embed_dims: [80, 160, 400, 640]
+depths: [4, 6, 12, 4]
 num_heads: [1, 2, 5, 8]
 mlp_ratios: [8.0, 8.0, 4.0, 4.0]
 patch_sizes: [7, 3, 3, 3]

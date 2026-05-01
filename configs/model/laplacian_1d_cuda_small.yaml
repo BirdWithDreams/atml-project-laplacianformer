@@ -2,9 +2,9 @@ name: "laplacian_1d_cuda_small"
 attn_type: "laplacian"
 laplacian_backend: "cuda_1d"
 laplacian_fallback_to_torch: false
-dim: 256
-depth: 4
-num_heads: 4
+dim: 512
+depth: 6
+num_heads: 8
 lambda_scale: 4.0
 pool_ratio: 4
 ns_iters: 5
