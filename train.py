@@ -95,9 +95,11 @@ def main(cfg: DictConfig):
             dataset_name=cfg.datamodule.dataset_name,
             batch_size=cfg.datamodule.batch_size,
             num_workers=cfg.datamodule.num_workers,
-            max_length=cfg.datamodule.max_length
+            max_length=cfg.datamodule.max_length,
+            label_column=cfg.datamodule.get("label_column", None),
         )
-        num_classes = cfg.datamodule.num_classes
+        label_names = datamodule.get_label_names()
+        num_classes = len(label_names)
     elif cfg.task.name == "semantic_segmentation":
         from src.datamodules.segmentation_datamodule import SegmentationDataModule
         datamodule = SegmentationDataModule(
@@ -147,17 +149,7 @@ def main(cfg: DictConfig):
         )
     elif cfg.task.name == "ner_task":
         from src.tasks.ner_task import NERTask
-        from datasets import load_dataset
-        
-        # Grab class names to properly inform seqeval about BIO tags
-        ds = load_dataset(cfg.datamodule.dataset_name, split="train")
-        # Most datasets use either 'ner_tags' or 'tags'
-        tag_col = "ner_tags" if "ner_tags" in ds.features else "tags" if "tags" in ds.features else None
-        
-        id2label = None
-        if tag_col and hasattr(ds.features[tag_col], "feature"):
-            class_names = ds.features[tag_col].feature.names
-            id2label = {i: v for i, v in enumerate(class_names)}
+        id2label = {i: label for i, label in enumerate(label_names)}
 
         task = NERTask(
             num_classes=num_classes,

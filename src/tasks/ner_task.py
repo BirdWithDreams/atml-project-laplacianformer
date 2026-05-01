@@ -14,21 +14,26 @@ class SeqevalMetric(Metric):
         self.id2label = id2label
         self.metric = evaluate.load("seqeval")
         
-        # State lists
-        self.add_state("predictions", default=[], dist_reduce_fx="cat")
-        self.add_state("references", default=[], dist_reduce_fx="cat")
+        self.add_state("predictions", default=[], dist_reduce_fx=None)
+        self.add_state("references", default=[], dist_reduce_fx=None)
 
     def update(self, preds: torch.Tensor, target: torch.Tensor):
         for k in range(preds.shape[0]):
-            pred = preds[k].cpu().tolist()
-            ref = target[k].cpu().tolist()
+            pred = preds[k].detach().cpu().tolist()
+            ref = target[k].detach().cpu().tolist()
 
-            true_predictions = [
-                self.id2label[p] for (p, l) in zip(pred, ref) if l != -100
-            ]
-            true_labels = [
-                self.id2label[l] for (p, l) in zip(pred, ref) if l != -100
-            ]
+            try:
+                true_predictions = [
+                    self.id2label[p] for (p, l) in zip(pred, ref) if l != -100
+                ]
+                true_labels = [
+                    self.id2label[l] for (p, l) in zip(pred, ref) if l != -100
+                ]
+            except KeyError as exc:
+                raise ValueError(
+                    f"NER label id {exc.args[0]} is missing from id2label. "
+                    "Check that the datamodule label names match num_classes."
+                ) from exc
             
             # Avoid empty sequence issues.
             if len(true_predictions) == 0:
@@ -50,16 +55,16 @@ class SeqevalMetric(Metric):
         token_f1 = f1_score(flat_references, flat_predictions, average="macro", zero_division=0)
 
         final_metrics = {
-            "Entity_Prec": torch.tensor(results["overall_precision"]),
-            "Entity_Rec": torch.tensor(results["overall_recall"]),
-            "Entity_F1": torch.tensor(results["overall_f1"]),
-            "Token_F1": torch.tensor(token_f1)
+            "Entity_Prec": torch.tensor(results["overall_precision"], device=self.device),
+            "Entity_Rec": torch.tensor(results["overall_recall"], device=self.device),
+            "Entity_F1": torch.tensor(results["overall_f1"], device=self.device),
+            "Token_F1": torch.tensor(token_f1, device=self.device)
         }
         
         # Per-entity type secondary metrics
         for key, value in results.items():
             if isinstance(value, dict) and 'f1' in value:
-                final_metrics[f"{key}_F1"] = torch.tensor(value['f1'])
+                final_metrics[f"{key}_F1"] = torch.tensor(value['f1'], device=self.device)
                 
         return final_metrics
 
@@ -128,7 +133,7 @@ class NERTask(L.LightningModule):
 
         logits = self(input_ids, attention_mask)
         # Flatten for CrossEntropyLoss
-        loss = self.criterion(logits.view(-1, self.hparams.num_classes), labels.view(-1))
+        loss = self.criterion(logits.reshape(-1, self.hparams.num_classes), labels.reshape(-1))
 
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
 
@@ -140,7 +145,7 @@ class NERTask(L.LightningModule):
         labels = batch["labels"]
 
         logits = self(input_ids, attention_mask)
-        loss = self.criterion(logits.view(-1, self.hparams.num_classes), labels.view(-1))
+        loss = self.criterion(logits.reshape(-1, self.hparams.num_classes), labels.reshape(-1))
         
         preds = torch.argmax(logits, dim=-1)
         self.val_metric(preds, labels)
@@ -159,7 +164,7 @@ class NERTask(L.LightningModule):
         labels = batch["labels"]
 
         logits = self(input_ids, attention_mask)
-        loss = self.criterion(logits.view(-1, self.hparams.num_classes), labels.view(-1))
+        loss = self.criterion(logits.reshape(-1, self.hparams.num_classes), labels.reshape(-1))
         
         preds = torch.argmax(logits, dim=-1)
         self.test_metric(preds, labels)
