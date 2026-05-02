@@ -1,9 +1,9 @@
 import lightning as L
 import torch
+from collections import Counter
 from torch.utils.data import DataLoader
 from datasets import ClassLabel, Sequence
 from datasets import load_dataset
-from transformers import AutoTokenizer
 
 
 TNER_ONTONOTES5_LABEL2ID = {
@@ -55,25 +55,33 @@ KNOWN_LABEL_NAMES = {
 
 
 class NERDataModule(L.LightningDataModule):
+    PAD_TOKEN = "<pad>"
+    UNK_TOKEN = "<unk>"
+
     def __init__(
-            self, dataset_name: str = "eriktks/conll2003", model_name: str = "bert-base-cased",
-            batch_size: int = 32, num_workers: int = 4, max_length: int = 128,
-            label_column: str | None = None
+            self, dataset_name: str = "eriktks/conll2003", batch_size: int = 32,
+            num_workers: int = 4, max_length: int = 128, label_column: str | None = None,
+            min_freq: int = 1, unk_replace_prob: float = 0.01
             ):
         super().__init__()
+        if not 0.0 <= unk_replace_prob <= 1.0:
+            raise ValueError("unk_replace_prob must be in [0.0, 1.0]")
         self.dataset_name = dataset_name
-        self.model_name = model_name
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.max_length = max_length
         self.label_column = label_column
+        self.min_freq = min_freq
+        self.unk_replace_prob = unk_replace_prob
         self.tokens_key: str | None = None
         self.labels_key: str | None = None
         self.label_names: list[str] | None = None
         self.id2label: dict[int, str] | None = None
         self.label2id: dict[str, int] | None = None
-        # add_prefix_space is required for some models for token classification with fast tokenizers
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name, add_prefix_space=True)
+        self.itos: list[str] | None = None
+        self.stoi: dict[str, int] | None = None
+        self.pad_id = 0
+        self.unk_id = 1
 
     def _load_dataset(self):
         return load_dataset(self.dataset_name)
@@ -135,6 +143,29 @@ class NERDataModule(L.LightningDataModule):
             self._resolve_schema(self._load_dataset())
         return list(self.label_names)
 
+    @property
+    def vocab_size(self) -> int:
+        if self.itos is None:
+            dataset = self._load_dataset()
+            self._resolve_schema(dataset)
+            self._build_vocab(dataset["train"])
+        return len(self.itos)
+
+    def _build_vocab(self, train_dataset):
+        counter = Counter()
+        for example in train_dataset:
+            counter.update(str(token) for token in example[self.tokens_key])
+
+        tokens = [
+            token
+            for token, count in sorted(counter.items(), key=lambda item: (-item[1], item[0]))
+            if count >= self.min_freq
+        ]
+        self.itos = [self.PAD_TOKEN, self.UNK_TOKEN, *tokens]
+        self.stoi = {token: idx for idx, token in enumerate(self.itos)}
+        self.pad_id = self.stoi[self.PAD_TOKEN]
+        self.unk_id = self.stoi[self.UNK_TOKEN]
+
     def _label_to_id(self, label_value) -> int:
         if isinstance(label_value, str):
             try:
@@ -152,6 +183,9 @@ class NERDataModule(L.LightningDataModule):
             )
         return label_id
 
+    def _token_to_id(self, token: str) -> int:
+        return self.stoi.get(str(token), self.unk_id)
+
     @staticmethod
     def _collate_batch(batch):
         return {
@@ -160,57 +194,67 @@ class NERDataModule(L.LightningDataModule):
             "labels": torch.tensor([example["labels"] for example in batch], dtype=torch.long),
         }
 
+    def _collate_train_batch(self, batch):
+        batch = self._collate_batch(batch)
+        if self.unk_replace_prob <= 0.0:
+            return batch
+
+        input_ids = batch["input_ids"].clone()
+        ordinary_tokens = (batch["attention_mask"] == 1) & (input_ids != self.unk_id)
+        replace_mask = (
+            torch.rand(input_ids.shape, device=input_ids.device) < self.unk_replace_prob
+        ) & ordinary_tokens
+        input_ids[replace_mask] = self.unk_id
+        batch["input_ids"] = input_ids
+        return batch
+
     def prepare_data(self):
         self._load_dataset()
 
     def setup(self, stage=None):
         dataset = self._load_dataset()
         self._resolve_schema(dataset)
-        
-        # Tokenize and align labels
-        def tokenize_and_align_labels(examples):
-            tokenized_inputs = self.tokenizer(
-                examples[self.tokens_key],
-                truncation=True,
-                padding="max_length",
-                max_length=self.max_length,
-                is_split_into_words=True
-            )
+        self._build_vocab(dataset["train"])
 
+        def encode_examples(examples):
+            input_ids = []
+            attention_masks = []
             labels = []
-            for i, label in enumerate(examples[self.labels_key]):
-                word_ids = tokenized_inputs.word_ids(batch_index=i)
-                previous_word_idx = None
-                label_ids = []
-                for word_idx in word_ids:
-                    # Special tokens have a word id that is None. We set the label to -100 so they are automatically ignored in the loss function.
-                    if word_idx is None:
-                        label_ids.append(-100)
-                    # We set the label for the first token of each word.
-                    elif word_idx != previous_word_idx:
-                        label_ids.append(self._label_to_id(label[word_idx]))
-                    # For the other tokens in a word, we set the label to either the current label or -100, depending on the label_all_tokens flag.
-                    else:
-                        label_ids.append(-100)
-                    previous_word_idx = word_idx
 
-                labels.append(label_ids)
+            for tokens, token_labels in zip(examples[self.tokens_key], examples[self.labels_key]):
+                tokens = list(tokens)[:self.max_length]
+                token_labels = list(token_labels)[:self.max_length]
+                sequence_length = len(tokens)
+                padding_length = self.max_length - sequence_length
 
-            tokenized_inputs["labels"] = labels
-            return tokenized_inputs
+                input_ids.append(
+                    [self._token_to_id(token) for token in tokens]
+                    + [self.pad_id] * padding_length
+                )
+                attention_masks.append([1] * sequence_length + [0] * padding_length)
+                labels.append(
+                    [self._label_to_id(label) for label in token_labels]
+                    + [-100] * padding_length
+                )
 
-        tokenized_datasets = dataset.map(
-            tokenize_and_align_labels,
+            return {
+                "input_ids": input_ids,
+                "attention_mask": attention_masks,
+                "labels": labels,
+            }
+
+        encoded_datasets = dataset.map(
+            encode_examples,
             batched=True,
             remove_columns=dataset["train"].column_names,
         )
         
         if stage == "fit" or stage is None:
-            self.train_dataset = tokenized_datasets["train"]
-            self.val_dataset = tokenized_datasets["validation"]
+            self.train_dataset = encoded_datasets["train"]
+            self.val_dataset = encoded_datasets["validation"]
         
         if stage == "test":
-            self.test_dataset = tokenized_datasets["test"]
+            self.test_dataset = encoded_datasets["test"]
 
     def train_dataloader(self):
         return DataLoader(
@@ -220,7 +264,7 @@ class NERDataModule(L.LightningDataModule):
             num_workers=self.num_workers,
             pin_memory=True,
             persistent_workers=self.num_workers > 0,
-            collate_fn=self._collate_batch,
+            collate_fn=self._collate_train_batch,
         )
 
     def val_dataloader(self):

@@ -1,8 +1,9 @@
 name: "ontonotes5"
-model_name: "bert-base-cased"
 dataset_name: "tner/ontonotes5"
 label_column: "tags"
-batch_size: 32
+min_freq: 1
+unk_replace_prob: 0.01
+batch_size: 256
 num_workers: 4
 max_length: 128
 num_classes: 37 # 18 classes * 2 (B/I) + 1 (O)

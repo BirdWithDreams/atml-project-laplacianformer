@@ -91,12 +91,13 @@ def main(cfg: DictConfig):
     elif cfg.task.name == "ner_task":
         from src.datamodules.ner_datamodule import NERDataModule
         datamodule = NERDataModule(
-            model_name=cfg.datamodule.get("model_name", "bert-base-cased"),
             dataset_name=cfg.datamodule.dataset_name,
             batch_size=cfg.datamodule.batch_size,
             num_workers=cfg.datamodule.num_workers,
             max_length=cfg.datamodule.max_length,
             label_column=cfg.datamodule.get("label_column", None),
+            min_freq=cfg.datamodule.get("min_freq", 1),
+            unk_replace_prob=cfg.datamodule.get("unk_replace_prob", 0.01),
         )
         label_names = datamodule.get_label_names()
         num_classes = len(label_names)
@@ -157,7 +158,7 @@ def main(cfg: DictConfig):
             weight_decay=weight_decay,
             optimizer=optimizer_name,
             model_cfg=model_cfg,
-            vocab_size=len(datamodule.tokenizer),
+            vocab_size=datamodule.vocab_size,
             max_seq_len=cfg.datamodule.max_length,
             id2label=id2label
         )
