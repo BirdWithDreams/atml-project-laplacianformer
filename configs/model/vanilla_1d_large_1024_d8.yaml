@@ -1,0 +1,5 @@
+name: "vanilla_1d_large_1024_d8"
+attn_type: "vanilla"
+dim: 1024
+depth: 8
+num_heads: 16
