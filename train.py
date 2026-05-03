@@ -181,6 +181,20 @@ def main(cfg: DictConfig):
             subset_seed=cfg.datamodule.get("subset_seed", cfg.seed),
         )
         num_classes = cfg.datamodule.num_classes
+    elif cfg.task.name == "generation_nlp":
+        from src.tasks.generation_nlp import NLPGenerationTask
+        task = NLPGenerationTask(
+            vocab_size=len(datamodule.tokenizer),
+            lr=lr,
+            weight_decay=weight_decay,
+            optimizer=optimizer_name,
+            model_cfg=model_cfg,
+            pad_token_id=datamodule.tokenizer.pad_token_id,
+            bos_token_id=datamodule.tokenizer.bos_token_id or datamodule.tokenizer.pad_token_id,
+            eos_token_id=datamodule.tokenizer.eos_token_id,
+            tokenizer=datamodule.tokenizer  
+        )
+        
     else:
         raise ValueError(f"Unknown task: {cfg.task.name}")
 
@@ -240,6 +254,18 @@ def main(cfg: DictConfig):
                 "log_segmentation_images_every_n_epochs",
                 1,
             ),
+        )
+    elif cfg.task.name == "generation_nlp":
+        from src.tasks.generation_nlp import NLPGenerationTask
+        task = NLPGenerationTask(
+            vocab_size=len(datamodule.tokenizer),
+            lr=lr,
+            weight_decay=weight_decay,
+            optimizer=optimizer_name,
+            model_cfg=model_cfg,
+            pad_token_id=datamodule.tokenizer.pad_token_id,
+            bos_token_id=datamodule.tokenizer.bos_token_id or datamodule.tokenizer.pad_token_id,
+            eos_token_id=datamodule.tokenizer.eos_token_id
         )
 
     if cfg.trainer.get("compile", True):
