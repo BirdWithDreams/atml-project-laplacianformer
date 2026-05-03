@@ -79,6 +79,19 @@ uv run train.py task=generation_nlp model=vanilla_seq2seq_base datamodule=seq2se
 uv run train.py task=generation_nlp model=vanilla_seq2seq_base model.attn_type=laplacian datamodule=seq2seq trainer.precision=32
 ```
 
+ImageNet Sample (Imagenette) Classification:
+
+To test ImageNet classification without downloading the full 150GB dataset, you can fetch a 10-class sample (Imagenette).
+
+1. Download and extract the sample:
+```bash
+uv run python download_sample.py
+```
+
+2. Run the training task:
+```bash
+uv run train.py task=cv_classification model=vanilla_pvt_small datamodule=imagenet
+```
 
 ## Matrix Scripts
 
