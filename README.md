@@ -6,6 +6,7 @@ This repository supports four Hydra task configs:
 - `semantic_segmentation`
 - `nlp_classification`
 - `ner_task`
+- `generation_nlp`
 
 ## Environment Setup
 
@@ -70,6 +71,14 @@ NER:
 uv run train.py task=ner_task model=vanilla_1d_small datamodule=conll2003
 uv run train.py task=ner_task model=laplacian_1d_cuda_small datamodule=ontonotes5 trainer.precision=32
 ```
+
+Text Generation (Summarization/Translation):
+```bash
+uv run train.py task=generation_nlp model=vanilla_seq2seq_base datamodule=seq2seq
+
+uv run train.py task=generation_nlp model=vanilla_seq2seq_base model.attn_type=laplacian datamodule=seq2seq trainer.precision=32
+```
+
 
 ## Matrix Scripts
 

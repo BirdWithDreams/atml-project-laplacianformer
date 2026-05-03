@@ -3,6 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 
+from .laplacian_1d_attn import CudaLaplacian1DLinearAttention
+from .laplacian_causal_attn import CausalLaplacianLinearAttention
+
 
 # ---------------------------------------------------------------------------
 # 1. Embeddings & Positional Encoding
@@ -146,42 +149,81 @@ class PositionwiseFeedForward(nn.Module):
 
 class EncoderLayer(nn.Module):
     """
-    Consists of Multi-Head Self-Attention and a Position-wise Feed-Forward Network.
+    Consists of a Self-Attention mechanism (either Vanilla Multi-Head or 1D Laplacian)
+    and a Position-wise Feed-Forward Network.
     Uses "Post-Layer Normalization" (Sublayer -> Add & Norm) as in the original paper.
     """
 
-    def __init__(self, d_model: int, num_heads: int, d_ff: int, dropout: float = 0.1):
+    def __init__(self, d_model: int, num_heads: int, d_ff: int, dropout: float = 0.1, attn_type="vanilla", attn_kwargs=None):
         super().__init__()
-        self.self_attn = MultiHeadAttention(d_model, num_heads, dropout)
-        self.ffn = PositionwiseFeedForward(d_model, d_ff, dropout)
+        self.attn_type = attn_type
+        attn_kwargs = attn_kwargs or {}
+        
+        if attn_type == "vanilla":
+            self.self_attn = MultiHeadAttention(d_model, num_heads, dropout)
+        elif attn_type == "laplacian":
+            self.self_attn = CudaLaplacian1DLinearAttention(
+                dim=d_model,
+                num_heads=num_heads,
+                lambda_scale=attn_kwargs.get("lambda_scale", 4.0),
+                pool_ratio=attn_kwargs.get("pool_ratio", 2),
+                ns_iters=attn_kwargs.get("ns_iters", 5)
+            )
+        else:
+            raise ValueError("attn_type must be 'vanilla' or 'laplacian'")
 
+        self.ffn = PositionwiseFeedForward(d_model, d_ff, dropout)
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
         # 1. Self-Attention + Add & Norm
-        attn_out = self.self_attn(q=x, k=x, v=x, mask=mask)
+        if self.attn_type == "vanilla":
+            attn_out, _ = self.self_attn(q=x, k=x, v=x, mask=mask)
+        else:
+            # Laplacian expects mask shape (B, N)
+            if mask is not None and mask.dim() > 2:
+                mask = mask.squeeze(1).squeeze(1) 
+            attn_out = self.self_attn(x, attention_mask=mask)
+            
         x = self.norm1(x + self.dropout(attn_out))
-
+        
         # 2. Feed-Forward + Add & Norm
         ffn_out = self.ffn(x)
         x = self.norm2(x + self.dropout(ffn_out))
-
         return x
 
 
 class DecoderLayer(nn.Module):
     """
-    Consists of Masked Self-Attention, Cross-Attention (to Encoder output), and FFN.
+    Consists of Masked Self-Attention (Vanilla or Causal Laplacian), 
+    Vanilla Cross-Attention (to Encoder output), and a Position-wise and FFN.
     """
 
-    def __init__(self, d_model: int, num_heads: int, d_ff: int, dropout: float = 0.1):
+    def __init__(self, d_model: int, num_heads: int, d_ff: int, dropout: float = 0.1, attn_type="vanilla", attn_kwargs=None):
         super().__init__()
-        self.self_attn = MultiHeadAttention(d_model, num_heads, dropout)
-        self.cross_attn = MultiHeadAttention(d_model, num_heads, dropout)
-        self.ffn = PositionwiseFeedForward(d_model, d_ff, dropout)
+        self.attn_type = attn_type
+        attn_kwargs = attn_kwargs or {}
 
+        if attn_type == "vanilla":
+            self.self_attn = MultiHeadAttention(d_model, num_heads, dropout)
+        elif attn_type == "laplacian":
+            # Masked Self-Attention MUST be causal to prevent looking into the future
+            self.self_attn = CausalLaplacianLinearAttention(
+                dim=d_model,
+                num_heads=num_heads,
+                lambda_scale=attn_kwargs.get("lambda_scale", 4.0),
+                ns_iters=attn_kwargs.get("ns_iters", 5)
+            )
+        else:
+            raise ValueError("attn_type must be 'vanilla' or 'laplacian'")
+
+        # Cross-Attention is ALWAYS Vanilla. 
+        # Laplacian 1D attention kernels do not natively support split Q and K/V inputs.
+        self.cross_attn = MultiHeadAttention(d_model, num_heads, dropout)
+        
+        self.ffn = PositionwiseFeedForward(d_model, d_ff, dropout)
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
         self.norm3 = nn.LayerNorm(d_model)
@@ -190,19 +232,23 @@ class DecoderLayer(nn.Module):
     def forward(
             self, x: torch.Tensor, enc_output: torch.Tensor,
             src_mask: torch.Tensor = None, tgt_mask: torch.Tensor = None
-            ) -> torch.Tensor:
-        # 1. Masked Self-Attention (prevents attending to future tokens)
-        attn_out = self.self_attn(q=x, k=x, v=x, mask=tgt_mask)
+        ) -> torch.Tensor:
+        
+        # 1. Masked Self-Attention
+        if self.attn_type == "vanilla":
+            attn_out, _ = self.self_attn(q=x, k=x, v=x, mask=tgt_mask)
+        else:
+            attn_out = self.self_attn(x, tgt_mask=tgt_mask)
+            
         x = self.norm1(x + self.dropout(attn_out))
-
+        
         # 2. Cross-Attention (Queries from Decoder, Keys/Values from Encoder)
-        cross_out = self.cross_attn(q=x, k=enc_output, v=enc_output, mask=src_mask)
+        cross_out, _ = self.cross_attn(q=x, k=enc_output, v=enc_output, mask=src_mask)
         x = self.norm2(x + self.dropout(cross_out))
-
+        
         # 3. Feed-Forward
         ffn_out = self.ffn(x)
         x = self.norm3(x + self.dropout(ffn_out))
-
         return x
 
 
@@ -218,8 +264,8 @@ class Transformer(nn.Module):
     def __init__(
             self, src_vocab_size: int, tgt_vocab_size: int, d_model: int = 512,
             num_heads: int = 8, num_layers: int = 6, d_ff: int = 2048,
-            max_len: int = 5000, dropout: float = 0.1
-            ):
+            max_len: int = 5000, dropout: float = 0.1, attn_type="vanilla", attn_kwargs=None
+        ):
         super().__init__()
 
         # Source and Target Embeddings + Positional Encodings
@@ -229,12 +275,12 @@ class Transformer(nn.Module):
 
         # Stacked Encoder Layers
         self.encoder_layers = nn.ModuleList(
-            [EncoderLayer(d_model, num_heads, d_ff, dropout) for _ in range(num_layers)]
+            [EncoderLayer(d_model, num_heads, d_ff, dropout, attn_type, attn_kwargs) for _ in range(num_layers)]
         )
 
         # Stacked Decoder Layers
         self.decoder_layers = nn.ModuleList(
-            [DecoderLayer(d_model, num_heads, d_ff, dropout) for _ in range(num_layers)]
+            [DecoderLayer(d_model, num_heads, d_ff, dropout, attn_type, attn_kwargs) for _ in range(num_layers)]
         )
 
         # Final linear projection to target vocabulary size
@@ -249,7 +295,7 @@ class Transformer(nn.Module):
     def decode(
             self, tgt: torch.Tensor, enc_output: torch.Tensor,
             src_mask: torch.Tensor, tgt_mask: torch.Tensor
-            ) -> torch.Tensor:
+        ) -> torch.Tensor:
         x = self.pos_encoding(self.tgt_embedding(tgt))
         for layer in self.decoder_layers:
             x = layer(x, enc_output, src_mask, tgt_mask)
@@ -258,7 +304,7 @@ class Transformer(nn.Module):
     def forward(
             self, src: torch.Tensor, tgt: torch.Tensor,
             src_mask: torch.Tensor = None, tgt_mask: torch.Tensor = None
-            ) -> torch.Tensor:
+        ) -> torch.Tensor:
 
         # Generate the encoded representation of the source
         enc_output = self.encode(src, src_mask)

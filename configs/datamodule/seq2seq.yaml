@@ -1,0 +1,10 @@
+name: "seq2seq"
+model_name: "t5-small"
+dataset_name: "cnn_dailymail"
+dataset_config: "3.0.0"
+source_column: "article"
+target_column: "highlights"
+batch_size: 16
+num_workers: 4
+max_source_length: 512
+max_target_length: 128

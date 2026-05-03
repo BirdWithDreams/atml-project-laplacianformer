@@ -1,0 +1,23 @@
+# @package _global_
+defaults:
+  - override /optimizer: adamw_text_default
+  - override /datamodule: seq2seq  # Points to the datamodule from Step 3
+
+task:
+  name: "generation_nlp"
+
+# For generation, you want a smaller initial learning rate and larger accumulation
+optimizer:
+  lr: 5e-5
+
+model:
+  name: "vanilla_seq2seq_base"
+  attn_type: "vanilla"
+  dim: 512
+  depth: 6
+  num_heads: 8
+  max_seq_len: 512
+
+trainer:
+  accumulate_grad_batches: 4
+  max_epochs: 10
