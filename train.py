@@ -171,6 +171,12 @@ def main(cfg: DictConfig):
             optimizer=optimizer_name,
             model_cfg=model_cfg,
             ignore_index=cfg.datamodule.get("ignore_index", 255),
+            log_segmentation_images=cfg.logger.get("log_segmentation_images", True),
+            num_log_segmentation_images=cfg.logger.get("num_log_segmentation_images", 4),
+            log_segmentation_images_every_n_epochs=cfg.logger.get(
+                "log_segmentation_images_every_n_epochs",
+                1,
+            ),
         )
 
     if cfg.trainer.get("compile", True):

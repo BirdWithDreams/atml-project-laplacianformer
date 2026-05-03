@@ -222,11 +222,16 @@ class SegmentationDataModule(L.LightningDataModule):
         )
 
     def _subset(self, dataset: Dataset, max_samples: Optional[int], split_name: str) -> Dataset:
-        if max_samples is None or max_samples <= 0 or max_samples >= len(dataset):
+        if max_samples is None:
+            return dataset
+
+        max_samples = int(max_samples)
+        if max_samples <= 0 or max_samples >= len(dataset):
             return dataset
 
         split_offsets = {"train": 0, "val": 1, "test": 2}
         generator = torch.Generator().manual_seed(self.subset_seed + split_offsets.get(split_name, 0))
+        # Use a seeded random permutation so max_*_samples is not biased toward the first files.
         indices = torch.randperm(len(dataset), generator=generator)[:max_samples].tolist()
         return Subset(dataset, indices)
 

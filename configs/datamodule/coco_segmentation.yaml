@@ -14,7 +14,9 @@ coco_year: "2017"
 # ./data/coco/val2017
 # ./data/coco/annotations/instances_train2017.json
 # ./data/coco/annotations/instances_val2017.json
-max_train_samples: null
+
+# Trains on a deterministic random subset when set to a positive integer.
+max_train_samples: 10000
 max_val_samples: null
 max_test_samples: null
 subset_seed: 42

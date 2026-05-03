@@ -2,3 +2,7 @@ project: "laplacian-vs-vanilla"
 name: "${task.name}_${model.name}_${datamodule.name}_${optimizer.name}"
 extra_tags: []
 save_dir: "./results"
+
+log_segmentation_images: true
+num_log_segmentation_images: 4
+log_segmentation_images_every_n_epochs: 1

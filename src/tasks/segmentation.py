@@ -6,6 +6,10 @@ from torchmetrics import Metric
 from src.models.segmentation import PyramidSegmentationModel
 
 
+IMAGENET_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_STD = (0.229, 0.224, 0.225)
+
+
 class SegmentationMetrics(Metric):
     def __init__(self, num_classes: int, ignore_index: int = 255, **kwargs):
         super().__init__(**kwargs)
@@ -60,6 +64,9 @@ class SemanticSegmentationTask(L.LightningModule):
             optimizer: str = "AdamW",
             model_cfg: dict = None,
             ignore_index: int = 255,
+            log_segmentation_images: bool = True,
+            num_log_segmentation_images: int = 4,
+            log_segmentation_images_every_n_epochs: int = 1,
             ):
         super().__init__()
         self.save_hyperparameters()
@@ -95,6 +102,8 @@ class SemanticSegmentationTask(L.LightningModule):
         self.criterion = nn.CrossEntropyLoss(ignore_index=ignore_index)
         self.val_metrics = SegmentationMetrics(num_classes=num_classes, ignore_index=ignore_index)
         self.test_metrics = SegmentationMetrics(num_classes=num_classes, ignore_index=ignore_index)
+        self._segmentation_log_counts = {"val": 0, "test": 0}
+        self._segmentation_class_labels = self._build_class_labels(num_classes, ignore_index)
 
     def forward(self, images: torch.Tensor) -> torch.Tensor:
         return self.model(images)
@@ -120,7 +129,11 @@ class SemanticSegmentationTask(L.LightningModule):
         preds = torch.argmax(logits, dim=1)
 
         self.val_metrics(preds, masks)
+        self._maybe_log_segmentation_images("val", images, masks, preds, batch_idx)
         self.log("val/loss", loss, prog_bar=True)
+
+    def on_validation_epoch_start(self):
+        self._segmentation_log_counts["val"] = 0
 
     def on_validation_epoch_end(self):
         metrics = self.val_metrics.compute()
@@ -135,13 +148,110 @@ class SemanticSegmentationTask(L.LightningModule):
         preds = torch.argmax(logits, dim=1)
 
         self.test_metrics(preds, masks)
+        self._maybe_log_segmentation_images("test", images, masks, preds, batch_idx)
         self.log("test/loss", loss)
+
+    def on_test_epoch_start(self):
+        self._segmentation_log_counts["test"] = 0
 
     def on_test_epoch_end(self):
         metrics = self.test_metrics.compute()
         self.log("test/mIoU", metrics["mIoU"])
         self.log("test/pixel_acc", metrics["pixel_acc"])
         self.test_metrics.reset()
+
+    @staticmethod
+    def _build_class_labels(num_classes: int, ignore_index: int) -> dict[int, str]:
+        class_labels = {
+            class_index: "background" if class_index == 0 else f"class_{class_index}"
+            for class_index in range(num_classes)
+        }
+        class_labels[ignore_index] = "ignore"
+        return class_labels
+
+    def _should_log_segmentation_images(self, split: str) -> bool:
+        if not self.hparams.log_segmentation_images:
+            return False
+        if int(self.hparams.num_log_segmentation_images) <= 0:
+            return False
+        if getattr(self.trainer, "sanity_checking", False):
+            return False
+        if not getattr(self.trainer, "is_global_zero", True):
+            return False
+
+        if split == "val":
+            every_n_epochs = max(int(self.hparams.log_segmentation_images_every_n_epochs), 1)
+            return self.current_epoch % every_n_epochs == 0
+        return split == "test"
+
+    def _maybe_log_segmentation_images(
+            self,
+            split: str,
+            images: torch.Tensor,
+            masks: torch.Tensor,
+            preds: torch.Tensor,
+            batch_idx: int,
+            ):
+        if not self._should_log_segmentation_images(split):
+            return
+
+        log_limit = int(self.hparams.num_log_segmentation_images)
+        already_logged = self._segmentation_log_counts.get(split, 0)
+        remaining = log_limit - already_logged
+        if remaining <= 0:
+            return
+
+        logger = getattr(self, "logger", None)
+        experiment = getattr(logger, "experiment", None) if logger is not None else None
+        if experiment is None or not hasattr(experiment, "log"):
+            return
+
+        try:
+            import wandb
+        except ImportError:
+            return
+
+        num_images = min(remaining, images.shape[0])
+        wandb_images = []
+        for sample_index in range(num_images):
+            log_index = already_logged + sample_index
+            wandb_images.append(
+                wandb.Image(
+                    self._to_display_image(images[sample_index]),
+                    masks={
+                        "prediction": {
+                            "mask_data": self._to_display_mask(preds[sample_index]),
+                            "class_labels": self._segmentation_class_labels,
+                        },
+                        "ground_truth": {
+                            "mask_data": self._to_display_mask(masks[sample_index]),
+                            "class_labels": self._segmentation_class_labels,
+                        },
+                    },
+                    caption=f"{split} epoch={self.current_epoch} batch={batch_idx} sample={log_index}",
+                )
+            )
+
+        if not wandb_images:
+            return
+
+        experiment.log(
+            {f"{split}/segmentation_masks": wandb_images},
+            step=int(self.global_step),
+        )
+        self._segmentation_log_counts[split] = already_logged + num_images
+
+    @staticmethod
+    def _to_display_image(image: torch.Tensor):
+        mean = image.new_tensor(IMAGENET_MEAN).view(3, 1, 1)
+        std = image.new_tensor(IMAGENET_STD).view(3, 1, 1)
+        image = (image.detach() * std + mean).clamp(0.0, 1.0)
+        image = image.permute(1, 2, 0).cpu().numpy()
+        return (image * 255).astype("uint8")
+
+    @staticmethod
+    def _to_display_mask(mask: torch.Tensor):
+        return mask.detach().to(torch.int32).cpu().numpy()
 
     def configure_optimizers(self):
         if self.hparams.optimizer == "AdamW":
