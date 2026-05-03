@@ -27,6 +27,34 @@ PRECISION="${PRECISION:-32}"
 COMPILE="${COMPILE:-false}"
 WANDB_PROJECT="${WANDB_PROJECT:-segmentation-model-matrix}"
 ACCUMULATE_GRAD_BATCHES="${ACCUMULATE_GRAD_BATCHES:-}"
+SKIP_FIRST_N=0
+EXTRA_ARGS=()
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --skip)
+      if [ "$#" -lt 2 ]; then
+        echo "--skip requires a non-negative integer argument"
+        exit 1
+      fi
+      SKIP_FIRST_N="$2"
+      shift 2
+      ;;
+    --skip=*)
+      SKIP_FIRST_N="${1#--skip=}"
+      shift
+      ;;
+    *)
+      EXTRA_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if ! [[ "${SKIP_FIRST_N}" =~ ^[0-9]+$ ]]; then
+  echo "--skip must be a non-negative integer, got: ${SKIP_FIRST_N}"
+  exit 1
+fi
 
 if [ -n "${MODELS:-}" ]; then
   read -r -a MODEL_LIST <<< "${MODELS}"
@@ -56,6 +84,7 @@ fi
 
 EXTRA_ARGS=("$@")
 FAILED_RUNS=()
+RUN_INDEX=0
 GRAD_ACCUM_ARGS=()
 if [ -n "${ACCUMULATE_GRAD_BATCHES}" ]; then
   GRAD_ACCUM_ARGS=(trainer.accumulate_grad_batches="${ACCUMULATE_GRAD_BATCHES}")
@@ -64,6 +93,12 @@ fi
 for dataset in "${DATASET_LIST[@]}"; do
   for optimizer in "${OPTIMIZER_LIST[@]}"; do
     for model in "${MODEL_LIST[@]}"; do
+      RUN_INDEX=$((RUN_INDEX + 1))
+      if [ "${RUN_INDEX}" -le "${SKIP_FIRST_N}" ]; then
+        echo "Skipping ${RUN_INDEX}: ${dataset}_${model}_${optimizer}"
+        continue
+      fi
+
       run_name="seg_${dataset}_${model}_${optimizer}"
       echo "================================================================"
       echo "Starting ${run_name}"
