@@ -7,6 +7,21 @@ This repository supports four Hydra task configs:
 - `nlp_classification`
 - `ner_task`
 
+## Environment Setup
+
+Create and activate the project virtual environment, then install the Python
+dependencies and local CUDA extension:
+
+```bash
+uv venv .venv --python 3.10
+source ./.venv/bin/activate
+uv pip install -r requirements.txt
+cd ./libs/laplacianformer
+uv pip install -e . --no-build-isolation
+cd ../..
+uv pip install seqeval
+```
+
 ## Model Matrix
 
 Image tasks use only PVT-style backbones with 2D RoPE:
