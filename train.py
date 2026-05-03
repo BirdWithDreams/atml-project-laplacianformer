@@ -61,6 +61,16 @@ def build_wandb_tags(cfg: DictConfig) -> list[str]:
     return tags
 
 
+def get_accumulate_grad_batches(cfg: DictConfig) -> int:
+    accumulate_grad_batches = int(cfg.trainer.get("accumulate_grad_batches", 1))
+    if accumulate_grad_batches < 1:
+        raise ValueError(
+            "trainer.accumulate_grad_batches must be a positive integer, "
+            f"got {accumulate_grad_batches}."
+        )
+    return accumulate_grad_batches
+
+
 @hydra.main(version_base="1.3", config_path="configs", config_name="config")
 def main(cfg: DictConfig):
     setup_loguru()
@@ -195,11 +205,17 @@ def main(cfg: DictConfig):
     )
 
     # 4. Setup Trainer
+    accumulate_grad_batches = get_accumulate_grad_batches(cfg)
+    logger.info(
+        "Using gradient accumulation: "
+        f"{accumulate_grad_batches} step(s) with datamodule.batch_size={cfg.datamodule.batch_size}"
+    )
     trainer = L.Trainer(
         max_epochs=cfg.trainer.max_epochs,
         accelerator=cfg.trainer.accelerator,
         devices=cfg.trainer.devices,
         precision=cfg.trainer.precision,
+        accumulate_grad_batches=accumulate_grad_batches,
         log_every_n_steps=cfg.trainer.log_every_n_steps,
         logger=wandb_logger,
     )

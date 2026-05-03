@@ -6,3 +6,6 @@ defaults:
 
 task:
   name: "cv_classification"
+
+trainer:
+  accumulate_grad_batches: 1

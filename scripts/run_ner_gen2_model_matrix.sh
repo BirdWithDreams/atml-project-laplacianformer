@@ -25,6 +25,7 @@ PRECISION="${PRECISION:-32}"
 WANDB_PROJECT="${WANDB_PROJECT:-ner-model-matrix}"
 GEN_TAG="${GEN_TAG:-gen_2}"
 COMPILE="${COMPILE:-false}"
+ACCUMULATE_GRAD_BATCHES="${ACCUMULATE_GRAD_BATCHES:-}"
 VANILLA_EPOCHS="${VANILLA_EPOCHS:-40}"
 LAPLACIAN_CONLL_EPOCHS="${LAPLACIAN_CONLL_EPOCHS:-50}"
 LAPLACIAN_ONTONOTES_EPOCHS="${LAPLACIAN_ONTONOTES_EPOCHS:-60}"
@@ -91,6 +92,7 @@ for dataset in "${DATASET_LIST[@]}"; do
     datamodule="${dataset}"
     optimizer="adam_text_baseline"
     max_epochs="${VANILLA_EPOCHS}"
+    accumulate_grad_batches="${ACCUMULATE_GRAD_BATCHES:-1}"
     overrides=()
 
     case "${experiment}" in
@@ -102,11 +104,17 @@ for dataset in "${DATASET_LIST[@]}"; do
         model="vanilla_1d_large_1024"
         optimizer="adam_text_lr7e_5"
         overrides=(datamodule.batch_size=128)
+        if [ -z "${ACCUMULATE_GRAD_BATCHES}" ]; then
+          accumulate_grad_batches=2
+        fi
         ;;
       vanilla_large_deep)
         model="vanilla_1d_large_1024_d8"
         optimizer="adam_text_lr5e_5"
         overrides=(datamodule.batch_size=64)
+        if [ -z "${ACCUMULATE_GRAD_BATCHES}" ]; then
+          accumulate_grad_batches=4
+        fi
         ;;
       laplacian_lambda8_pool2)
         model="laplacian_1d_cuda_medium_lambda8_pool2_ns8"
@@ -127,6 +135,9 @@ for dataset in "${DATASET_LIST[@]}"; do
       laplacian_lambda8_pool1)
         model="laplacian_1d_cuda_medium_lambda8_pool1_ns8"
         overrides=(datamodule.batch_size=128)
+        if [ -z "${ACCUMULATE_GRAD_BATCHES}" ]; then
+          accumulate_grad_batches=2
+        fi
         if [ "${dataset}" = "ontonotes5" ]; then
           max_epochs="${LAPLACIAN_ONTONOTES_EPOCHS}"
         else
@@ -155,6 +166,7 @@ for dataset in "${DATASET_LIST[@]}"; do
       trainer.precision="${PRECISION}" \
       trainer.compile="${COMPILE}" \
       trainer.max_epochs="${max_epochs}" \
+      trainer.accumulate_grad_batches="${accumulate_grad_batches}" \
       logger.project="${WANDB_PROJECT}" \
       logger.name="${run_name}" \
       logger.extra_tags="[${GEN_TAG}]" \

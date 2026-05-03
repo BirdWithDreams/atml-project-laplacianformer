@@ -28,6 +28,7 @@ DEVICES="${DEVICES:-1}"
 PRECISION="${PRECISION:-32}"
 WANDB_PROJECT="${WANDB_PROJECT:-ner-model-matrix}"
 COMPILE="${COMPILE:-false}"
+ACCUMULATE_GRAD_BATCHES="${ACCUMULATE_GRAD_BATCHES:-}"
 
 if [ -n "${MODELS:-}" ]; then
   read -r -a MODEL_LIST <<< "${MODELS}"
@@ -57,6 +58,10 @@ fi
 
 EXTRA_ARGS=("$@")
 FAILED_RUNS=()
+GRAD_ACCUM_ARGS=()
+if [ -n "${ACCUMULATE_GRAD_BATCHES}" ]; then
+  GRAD_ACCUM_ARGS=(trainer.accumulate_grad_batches="${ACCUMULATE_GRAD_BATCHES}")
+fi
 
 for dataset in "${DATASET_LIST[@]}"; do
   for optimizer in "${OPTIMIZER_LIST[@]}"; do
@@ -75,6 +80,7 @@ for dataset in "${DATASET_LIST[@]}"; do
         trainer.devices="${DEVICES}" \
         trainer.precision="${PRECISION}" \
         trainer.compile="${COMPILE}" \
+        "${GRAD_ACCUM_ARGS[@]}" \
         logger.project="${WANDB_PROJECT}" \
         logger.name="${run_name}" \
         "${EXTRA_ARGS[@]}"; then
