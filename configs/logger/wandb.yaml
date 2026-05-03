@@ -1,4 +1,5 @@
 project: "laplacian-vs-vanilla"
+entity: "anmero-espol"
 name: "${task.name}_${model.name}_${datamodule.name}_${optimizer.name}"
 extra_tags: []
 save_dir: "./results"

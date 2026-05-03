@@ -187,6 +187,7 @@ def main(cfg: DictConfig):
     logger.info(f"Using W&B tags: {wandb_tags}")
     wandb_logger = WandbLogger(
         project=cfg.logger.project,
+        entity=cfg.logger.get("entity", None),
         name=cfg.logger.name,
         tags=wandb_tags,
         config=OmegaConf.to_container(cfg, resolve=True),
