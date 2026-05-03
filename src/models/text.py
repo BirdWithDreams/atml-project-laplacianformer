@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
 from .vanilla_attn import MultiHeadAttention
-from .laplacian_attn import Laplacian1DLinearAttention
-from .laplacian_fast_1d_attn import FastCudaLaplacian1DLinearAttention
+from .laplacian_1d_attn import CudaLaplacian1DLinearAttention
 
 class TextTransformerBlock(nn.Module):
     def __init__(self, dim, num_heads, attn_type="vanilla", attn_kwargs=None):
@@ -14,25 +13,16 @@ class TextTransformerBlock(nn.Module):
         if attn_type == "vanilla":
             self.attn = MultiHeadAttention(d_model=dim, num_heads=num_heads)
         elif attn_type == "laplacian":
-            laplacian_backend = attn_kwargs.get("laplacian_backend", "torch")
-            if laplacian_backend == "torch":
-                attn_cls = Laplacian1DLinearAttention
-                backend_kwargs = {}
-            elif laplacian_backend == "cuda_1d":
-                attn_cls = FastCudaLaplacian1DLinearAttention
-                backend_kwargs = {
-                    "fallback_to_torch": attn_kwargs.get("laplacian_fallback_to_torch", True),
-                }
-            else:
-                raise ValueError("laplacian_backend must be 'torch' or 'cuda_1d' for text models")
+            laplacian_backend = attn_kwargs.get("laplacian_backend", "cuda_1d")
+            if laplacian_backend != "cuda_1d":
+                raise ValueError("Text Laplacian attention supports only laplacian_backend='cuda_1d'")
 
-            self.attn = attn_cls(
+            self.attn = CudaLaplacian1DLinearAttention(
                 dim=dim,
                 num_heads=num_heads,
                 lambda_scale=attn_kwargs.get("lambda_scale", 4.0),
                 pool_ratio=attn_kwargs.get("pool_ratio", 2),
                 ns_iters=attn_kwargs.get("ns_iters", 5),
-                **backend_kwargs,
             )
         else:
             raise ValueError("attn_type must be 'vanilla' or 'laplacian'")
@@ -65,7 +55,7 @@ class TextBackbone(nn.Module):
             self, vocab_size=30522, max_seq_len=128,
             dim=384, depth=6, num_heads=6, attn_type="vanilla",
             lambda_scale=4.0, pool_ratio=2, ns_iters=5,
-            laplacian_backend="torch", laplacian_fallback_to_torch=True
+            laplacian_backend="cuda_1d",
             ):
         super().__init__()
         # Standard embedding
@@ -77,7 +67,6 @@ class TextBackbone(nn.Module):
             "pool_ratio": pool_ratio,
             "ns_iters": ns_iters,
             "laplacian_backend": laplacian_backend,
-            "laplacian_fallback_to_torch": laplacian_fallback_to_torch,
         }
         
         # [CLS] token equivalent is usually first token or pooled. In BERT, it's the first token.

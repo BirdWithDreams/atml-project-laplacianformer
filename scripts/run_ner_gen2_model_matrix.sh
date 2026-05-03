@@ -28,6 +28,34 @@ COMPILE="${COMPILE:-false}"
 VANILLA_EPOCHS="${VANILLA_EPOCHS:-40}"
 LAPLACIAN_CONLL_EPOCHS="${LAPLACIAN_CONLL_EPOCHS:-50}"
 LAPLACIAN_ONTONOTES_EPOCHS="${LAPLACIAN_ONTONOTES_EPOCHS:-60}"
+SKIP_FIRST_N=0
+EXTRA_ARGS=()
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --skip)
+      if [ "$#" -lt 2 ]; then
+        echo "--skip requires a non-negative integer argument"
+        exit 1
+      fi
+      SKIP_FIRST_N="$2"
+      shift 2
+      ;;
+    --skip=*)
+      SKIP_FIRST_N="${1#--skip=}"
+      shift
+      ;;
+    *)
+      EXTRA_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if ! [[ "${SKIP_FIRST_N}" =~ ^[0-9]+$ ]]; then
+  echo "--skip must be a non-negative integer, got: ${SKIP_FIRST_N}"
+  exit 1
+fi
 
 if [ -n "${EXPERIMENTS:-}" ]; then
   read -r -a EXPERIMENT_LIST <<< "${EXPERIMENTS}"
@@ -49,11 +77,17 @@ else
   TRAIN_CMD_LIST=(python)
 fi
 
-EXTRA_ARGS=("$@")
 FAILED_RUNS=()
+RUN_INDEX=0
 
 for dataset in "${DATASET_LIST[@]}"; do
   for experiment in "${EXPERIMENT_LIST[@]}"; do
+    RUN_INDEX=$((RUN_INDEX + 1))
+    if [ "${RUN_INDEX}" -le "${SKIP_FIRST_N}" ]; then
+      echo "Skipping ${RUN_INDEX}: ${dataset}_${experiment}"
+      continue
+    fi
+
     datamodule="${dataset}"
     optimizer="adam_text_baseline"
     max_epochs="${VANILLA_EPOCHS}"

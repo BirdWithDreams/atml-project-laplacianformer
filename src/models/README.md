@@ -10,7 +10,7 @@ Image tasks use one backbone family:
 - `pvt.py`: PVT-style hierarchical vision backbone.
 - `rope.py`: 2D RoPE used inside PVT attention blocks.
 - `segmentation.py`: segmentation decoder on top of PVT feature maps.
-- `laplacian_attn.py`: 2D Laplacian attention and the shared 1D base.
+- `laplacian_attn.py`: 2D Laplacian attention and shared Newton-Schulz inverse.
 - `laplacian_fast_attn.py`: CUDA-backed 2D Laplacian attention wrapper.
 - `laplacian_cuda_ops.py`: autograd wrapper for `libs/laplacianformer`.
 - `vanilla_attn.py`: vanilla softmax attention baseline used inside PVT.
@@ -31,7 +31,7 @@ Text tasks use 1D sequence backbones:
 
 - `text.py`: sequence classification backbone.
 - `text_ner.py`: token classification backbone for NER.
-- `laplacian_fast_1d_attn.py`: CUDA-backed 1D Laplacian attention wrapper.
+- `laplacian_1d_attn.py`: CUDA-backed 1D Laplacian attention for text.
 - `laplacian_1d_cuda_ops.py`: autograd wrapper for `libs/laplacianformer_1d`.
 
 Supported text configs:

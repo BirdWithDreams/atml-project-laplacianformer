@@ -9,9 +9,30 @@ namespace {
 constexpr int THREADS = 256;
 
 template <typename scalar_t>
-__device__ __forceinline__ float sign_diff(scalar_t lhs, scalar_t rhs) {
-    float diff = static_cast<float>(lhs) - static_cast<float>(rhs);
-    return (diff > 0.0f) - (diff < 0.0f);
+struct AccT { using type = float; };
+template <>
+struct AccT<double> { using type = double; };
+
+template <typename scalar_t>
+__device__ __forceinline__ typename AccT<scalar_t>::type to_acc(scalar_t v) {
+    return static_cast<typename AccT<scalar_t>::type>(v);
+}
+
+template <typename scalar_t>
+__device__ __forceinline__ scalar_t from_acc(typename AccT<scalar_t>::type v) {
+    return static_cast<scalar_t>(v);
+}
+
+template <typename scalar_t>
+__device__ __forceinline__ typename AccT<scalar_t>::type sign_diff(scalar_t lhs, scalar_t rhs) {
+    using acc_t = typename AccT<scalar_t>::type;
+    acc_t diff = to_acc<scalar_t>(lhs) - to_acc<scalar_t>(rhs);
+    return (diff > acc_t(0)) - (diff < acc_t(0));
+}
+
+template <typename T>
+__device__ __forceinline__ T abs_val(T v) {
+    return v < T(0) ? -v : v;
 }
 
 template <typename scalar_t>
@@ -23,6 +44,7 @@ __global__ void laplacian_1d_forward_kernel(
         int N,
         int M,
         int D) {
+    using acc_t = typename AccT<scalar_t>::type;
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= total) return;
 
@@ -34,12 +56,12 @@ __global__ void laplacian_1d_forward_kernel(
     const scalar_t* q = query + (bh * N + n) * D;
     const scalar_t* k = key + (bh * M + m) * D;
 
-    float acc = 0.0f;
+    acc_t acc = acc_t(0);
     for (int d = 0; d < D; ++d) {
-        float diff = static_cast<float>(q[d]) - static_cast<float>(k[d]);
-        acc += fabsf(diff);
+        acc_t diff = to_acc<scalar_t>(q[d]) - to_acc<scalar_t>(k[d]);
+        acc += abs_val<acc_t>(diff);
     }
-    output[idx] = static_cast<scalar_t>(acc);
+    output[idx] = from_acc<scalar_t>(acc);
 }
 
 template <typename scalar_t>
@@ -52,6 +74,7 @@ __global__ void laplacian_1d_backward_query_kernel(
         int N,
         int M,
         int D) {
+    using acc_t = typename AccT<scalar_t>::type;
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= total) return;
 
@@ -61,13 +84,13 @@ __global__ void laplacian_1d_backward_query_kernel(
     int bh = tmp / N;
 
     scalar_t q_val = query[(bh * N + n) * D + d];
-    float acc = 0.0f;
+    acc_t acc = acc_t(0);
     for (int m = 0; m < M; ++m) {
         scalar_t k_val = key[(bh * M + m) * D + d];
-        float grad = static_cast<float>(grad_output[(bh * N + n) * M + m]);
+        acc_t grad = to_acc<scalar_t>(grad_output[(bh * N + n) * M + m]);
         acc += grad * sign_diff(q_val, k_val);
     }
-    grad_query[idx] = static_cast<scalar_t>(acc);
+    grad_query[idx] = from_acc<scalar_t>(acc);
 }
 
 template <typename scalar_t>
@@ -80,6 +103,7 @@ __global__ void laplacian_1d_backward_key_kernel(
         int N,
         int M,
         int D) {
+    using acc_t = typename AccT<scalar_t>::type;
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= total) return;
 
@@ -89,13 +113,13 @@ __global__ void laplacian_1d_backward_key_kernel(
     int bh = tmp / M;
 
     scalar_t k_val = key[(bh * M + m) * D + d];
-    float acc = 0.0f;
+    acc_t acc = acc_t(0);
     for (int n = 0; n < N; ++n) {
         scalar_t q_val = query[(bh * N + n) * D + d];
-        float grad = static_cast<float>(grad_output[(bh * N + n) * M + m]);
+        acc_t grad = to_acc<scalar_t>(grad_output[(bh * N + n) * M + m]);
         acc -= grad * sign_diff(q_val, k_val);
     }
-    grad_key[idx] = static_cast<scalar_t>(acc);
+    grad_key[idx] = from_acc<scalar_t>(acc);
 }
 
 void check_inputs(const at::Tensor query, const at::Tensor key) {

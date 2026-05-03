@@ -66,6 +66,8 @@ class NERDataModule(L.LightningDataModule):
         super().__init__()
         if not 0.0 <= unk_replace_prob <= 1.0:
             raise ValueError("unk_replace_prob must be in [0.0, 1.0]")
+        if max_length < 1:
+            raise ValueError("max_length must be at least 1")
         self.dataset_name = dataset_name
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -186,12 +188,26 @@ class NERDataModule(L.LightningDataModule):
     def _token_to_id(self, token: str) -> int:
         return self.stoi.get(str(token), self.unk_id)
 
-    @staticmethod
-    def _collate_batch(batch):
+    def _collate_batch(self, batch):
+        batch_length = max(1, max(len(example["input_ids"]) for example in batch))
+
+        def pad(values, pad_value):
+            values = list(values)
+            return values + [pad_value] * (batch_length - len(values))
+
         return {
-            "input_ids": torch.tensor([example["input_ids"] for example in batch], dtype=torch.long),
-            "attention_mask": torch.tensor([example["attention_mask"] for example in batch], dtype=torch.long),
-            "labels": torch.tensor([example["labels"] for example in batch], dtype=torch.long),
+            "input_ids": torch.tensor(
+                [pad(example["input_ids"], self.pad_id) for example in batch],
+                dtype=torch.long,
+            ),
+            "attention_mask": torch.tensor(
+                [pad(example["attention_mask"], 0) for example in batch],
+                dtype=torch.long,
+            ),
+            "labels": torch.tensor(
+                [pad(example["labels"], -100) for example in batch],
+                dtype=torch.long,
+            ),
         }
 
     def _collate_train_batch(self, batch):
@@ -225,17 +241,10 @@ class NERDataModule(L.LightningDataModule):
                 tokens = list(tokens)[:self.max_length]
                 token_labels = list(token_labels)[:self.max_length]
                 sequence_length = len(tokens)
-                padding_length = self.max_length - sequence_length
 
-                input_ids.append(
-                    [self._token_to_id(token) for token in tokens]
-                    + [self.pad_id] * padding_length
-                )
-                attention_masks.append([1] * sequence_length + [0] * padding_length)
-                labels.append(
-                    [self._label_to_id(label) for label in token_labels]
-                    + [-100] * padding_length
-                )
+                input_ids.append([self._token_to_id(token) for token in tokens])
+                attention_masks.append([1] * sequence_length)
+                labels.append([self._label_to_id(label) for label in token_labels])
 
             return {
                 "input_ids": input_ids,

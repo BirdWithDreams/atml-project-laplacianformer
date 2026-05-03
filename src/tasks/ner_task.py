@@ -100,8 +100,7 @@ class NERTask(L.LightningModule):
             lambda_scale=model_cfg.get("lambda_scale", 4.0),
             pool_ratio=model_cfg.get("pool_ratio", 2),
             ns_iters=model_cfg.get("ns_iters", 5),
-            laplacian_backend=model_cfg.get("laplacian_backend", "torch"),
-            laplacian_fallback_to_torch=model_cfg.get("laplacian_fallback_to_torch", True),
+            laplacian_backend=model_cfg.get("laplacian_backend", "cuda_1d"),
         )
 
         dim = model_cfg.get("dim", 384)

@@ -73,8 +73,9 @@ scripts/run_segmentation_model_matrix.sh
 Or with `screen` (preffered):
 ```bash
 LOG="./logs/ner_log_$(date +%Y%m%d_%H%M%S).log" && screen -S ner_run -L -Logfile "$LOG" -dm bash -lc 'cd /workspace/atml-project-laplacianformer && source .venv/bin/activate && bash scripts/run_ner_model_matrix.sh'
+LOG="./logs/ner_log_$(date +%Y%m%d_%H%M%S).log" && screen -S ner_run -L -Logfile "$LOG" -dm bash -lc 'cd /workspace/atml-project-laplacianformer && source .venv/bin/activate && bash scripts/run_ner_gen2_model_matrix.sh --skip 3'
 
-LOG="./logs/seg_log_$(date +%Y%m%d_%H%M%S).log" && screen -S seg_run -L -Logfile "$LOG" -dm bash -lc 'cd /workspace/atml-project-laplacianformer && source .venv/bin/activate && bash scripts/run_segmentation_model_matrix.sh'
+LOG="./logs/seg_log_$(date +%Y%m%d_%H%M%S).log" && screen -S seg_run -L -Logfile "$LOG" -dm bash -lc 'cd /workspace/atml-project-laplacianformer && source .venv/bin/activate && sleep 20m && bash scripts/run_segmentation_model_matrix.sh'
 ```
 
 Both scripts accept space-separated environment overrides, for example:
@@ -91,7 +92,7 @@ scripts/run_segmentation_model_matrix.sh
 `src/models` is intentionally narrow:
 
 - image: `pvt.py`, `rope.py`, `segmentation.py`, 2D Laplacian CUDA wrappers
-- text: `text.py`, `text_ner.py`, 1D Laplacian CUDA wrappers
+- text: `text.py`, `text_ner.py`, `laplacian_1d_attn.py`, 1D Laplacian CUDA wrapper
 - shared attention: `vanilla_attn.py`, `laplacian_attn.py`
 
 The old flat ViT-style vision path and non-task model configs were removed.

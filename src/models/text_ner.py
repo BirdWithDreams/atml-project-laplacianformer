@@ -10,7 +10,7 @@ class TextBackboneNER(nn.Module):
             self, vocab_size=30522, max_seq_len=128,
             dim=384, depth=6, num_heads=6, attn_type="vanilla",
             lambda_scale=4.0, pool_ratio=2, ns_iters=5,
-            laplacian_backend="torch", laplacian_fallback_to_torch=True
+            laplacian_backend="cuda_1d",
             ):
         super().__init__()
         # Standard embedding
@@ -22,7 +22,6 @@ class TextBackboneNER(nn.Module):
             "pool_ratio": pool_ratio,
             "ns_iters": ns_iters,
             "laplacian_backend": laplacian_backend,
-            "laplacian_fallback_to_torch": laplacian_fallback_to_torch,
         }
         
         self.blocks = nn.ModuleList(
