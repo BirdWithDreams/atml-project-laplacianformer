@@ -20,17 +20,49 @@ DEFAULT_DATASETS=(
   stanford_background_segmentation
 )
 
+\
+Script flags:
+  --skip N      Skip the first N planned experiments
+  --limit N     Run at most N experiments after skipping
+  --dry-run     Print commands without executing
+  --help        Show this message
+
+
 ACCELERATOR="${ACCELERATOR:-gpu}"
 DEVICES="${DEVICES:-1}"
 PRECISION="${PRECISION:-32}"
 COMPILE="${COMPILE:-false}"
-ACCUMULATE_GRAD_BATCHES="${ACCUMULATE_GRAD_BATCHES:-4}"
-MAX_STEPS="${MAX_STEPS:-}"
-WANDB_PROJECT="${WANDB_PROJECT:-stanford-background-segmentation}"
-WANDB_ENTITY="${WANDB_ENTITY:-}"
-MODEL_IMG_SIZE="${MODEL_IMG_SIZE:-320}"
-DRY_RUN="${DRY_RUN:-false}"
-SEED="${SEED:-42}"
+WANDB_PROJECT="${WANDB_PROJECT:-segmentation-model-matrix}"
+ACCUMULATE_GRAD_BATCHES="${ACCUMULATE_GRAD_BATCHES:-}"
+SKIP_FIRST_N=0
+EXTRA_ARGS=()
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --skip)
+      if [ "$#" -lt 2 ]; then
+        echo "--skip requires a non-negative integer argument"
+        exit 1
+      fi
+      SKIP_FIRST_N="$2"
+      shift 2
+      ;;
+    --skip=*)
+      SKIP_FIRST_N="${1#--skip=}"
+      shift
+      ;;
+    *)
+      EXTRA_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if ! [[ "${SKIP_FIRST_N}" =~ ^[0-9]+$ ]]; then
+  echo "--skip must be a non-negative integer, got: ${SKIP_FIRST_N}"
+  exit 1
+fi
+>>>>>>> d5cb6d1 (Introduces  argument to segmentation batch script)
 
 AUTO_BACKBONE_CHECKPOINTS="${AUTO_BACKBONE_CHECKPOINTS:-false}"
 CV_BACKBONE_ROOT="${CV_BACKBONE_ROOT:-results/cv-model-matrix}"
@@ -96,7 +128,22 @@ else
   TRAIN_CMD_LIST=(python)
 fi
 
+
 TRAINER_ARGS=(
+
+RUN_SET="${RUN_SET:-baseline}"
+ACCELERATOR="${ACCELERATOR:-gpu}"
+DEVICES="${DEVICES:-1}"
+PRECISION="${PRECISION:-32}"
+COMPILE="${COMPILE:-false}"
+WANDB_PROJECT="${WANDB_PROJECT:-segmentation-baselines}"
+ACCUMULATE_GRAD_BATCHES="${ACCUMULATE_GRAD_BATCHES:-4}"
+MAX_STEPS="${MAX_STEPS:-}"
+
+COMMON_OVERRIDES=(
+  task=semantic_segmentation
+  optimizer=adamw_segmentation_poly
+
   trainer.accelerator="${ACCELERATOR}"
   trainer.devices="${DEVICES}"
   trainer.precision="${PRECISION}"
@@ -127,6 +174,29 @@ fi
 if [ -n "${MAX_TEST_SAMPLES:-}" ]; then
   DATAMODULE_ARGS+=(datamodule.max_test_samples="${MAX_TEST_SAMPLES}")
 fi
+
+EXTRA_ARGS=("$@")
+FAILED_RUNS=()
+RUN_INDEX=0
+GRAD_ACCUM_ARGS=()
+if [ -n "${ACCUMULATE_GRAD_BATCHES}" ]; then
+  GRAD_ACCUM_ARGS=(trainer.accumulate_grad_batches="${ACCUMULATE_GRAD_BATCHES}")
+fi
+
+for dataset in "${DATASET_LIST[@]}"; do
+  for optimizer in "${OPTIMIZER_LIST[@]}"; do
+    for model in "${MODEL_LIST[@]}"; do
+      RUN_INDEX=$((RUN_INDEX + 1))
+      if [ "${RUN_INDEX}" -le "${SKIP_FIRST_N}" ]; then
+        echo "Skipping ${RUN_INDEX}: ${dataset}_${model}_${optimizer}"
+        continue
+      fi
+
+      run_name="seg_${dataset}_${model}_${optimizer}"
+      echo "================================================================"
+      echo "Starting ${run_name}"
+      echo "================================================================"
+
 
 manual_checkpoint_for_model() {
   local model="$1"
