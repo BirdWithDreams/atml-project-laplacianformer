@@ -135,8 +135,12 @@ def main(cfg: DictConfig):
         from src.models.text_seq2seq import TextSeq2SeqBackbone        
 
         # 1. INITIALIZE DATAMODULE FIRST
-        # This downloads the tokenizer and dataset so we can measure the vocab size
-        datamodule = Seq2SeqDataModule(**cfg.datamodule)
+        # Convert the Hydra config to a standard dictionary and remove 'name'
+        dm_kwargs = dict(cfg.datamodule)
+        dm_kwargs.pop("name", None) 
+        
+        # Unpack the cleaned dictionary
+        datamodule = Seq2SeqDataModule(**dm_kwargs)
 
         # 2. INITIALIZE BACKBONE SECOND
         # Now we can safely call len(datamodule.tokenizer)
