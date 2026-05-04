@@ -20,20 +20,12 @@ DEFAULT_DATASETS=(
   stanford_background_segmentation
 )
 
-\
-Script flags:
-  --skip N      Skip the first N planned experiments
-  --limit N     Run at most N experiments after skipping
-  --dry-run     Print commands without executing
-  --help        Show this message
-
-
 ACCELERATOR="${ACCELERATOR:-gpu}"
 DEVICES="${DEVICES:-1}"
 PRECISION="${PRECISION:-32}"
 COMPILE="${COMPILE:-false}"
 WANDB_PROJECT="${WANDB_PROJECT:-segmentation-model-matrix}"
-ACCUMULATE_GRAD_BATCHES="${ACCUMULATE_GRAD_BATCHES:-}"
+ACCUMULATE_GRAD_BATCHES="${ACCUMULATE_GRAD_BATCHES:-8}"
 SKIP_FIRST_N=0
 EXTRA_ARGS=()
 
@@ -62,7 +54,10 @@ if ! [[ "${SKIP_FIRST_N}" =~ ^[0-9]+$ ]]; then
   echo "--skip must be a non-negative integer, got: ${SKIP_FIRST_N}"
   exit 1
 fi
+<<<<<<< HEAD
 >>>>>>> d5cb6d1 (Introduces  argument to segmentation batch script)
+=======
+>>>>>>> 65300ee (new condig files)
 
 AUTO_BACKBONE_CHECKPOINTS="${AUTO_BACKBONE_CHECKPOINTS:-false}"
 CV_BACKBONE_ROOT="${CV_BACKBONE_ROOT:-results/cv-model-matrix}"
@@ -126,53 +121,6 @@ elif command -v uv >/dev/null 2>&1; then
   TRAIN_CMD_LIST=(uv run python)
 else
   TRAIN_CMD_LIST=(python)
-fi
-
-
-TRAINER_ARGS=(
-
-RUN_SET="${RUN_SET:-baseline}"
-ACCELERATOR="${ACCELERATOR:-gpu}"
-DEVICES="${DEVICES:-1}"
-PRECISION="${PRECISION:-32}"
-COMPILE="${COMPILE:-false}"
-WANDB_PROJECT="${WANDB_PROJECT:-segmentation-baselines}"
-ACCUMULATE_GRAD_BATCHES="${ACCUMULATE_GRAD_BATCHES:-4}"
-MAX_STEPS="${MAX_STEPS:-}"
-
-COMMON_OVERRIDES=(
-  task=semantic_segmentation
-  optimizer=adamw_segmentation_poly
-
-  trainer.accelerator="${ACCELERATOR}"
-  trainer.devices="${DEVICES}"
-  trainer.precision="${PRECISION}"
-  trainer.compile="${COMPILE}"
-)
-
-if [ -n "${ACCUMULATE_GRAD_BATCHES}" ]; then
-  TRAINER_ARGS+=(trainer.accumulate_grad_batches="${ACCUMULATE_GRAD_BATCHES}")
-fi
-if [ -n "${MAX_STEPS}" ]; then
-  TRAINER_ARGS+=(trainer.max_steps="${MAX_STEPS}")
-  TRAINER_ARGS+=(optimizer.max_iters="${MAX_STEPS}")
-fi
-
-DATAMODULE_ARGS=()
-if [ -n "${BATCH_SIZE:-}" ]; then
-  DATAMODULE_ARGS+=(datamodule.batch_size="${BATCH_SIZE}")
-fi
-if [ -n "${NUM_WORKERS:-}" ]; then
-  DATAMODULE_ARGS+=(datamodule.num_workers="${NUM_WORKERS}")
-fi
-if [ -n "${MAX_TRAIN_SAMPLES:-}" ]; then
-  DATAMODULE_ARGS+=(datamodule.max_train_samples="${MAX_TRAIN_SAMPLES}")
-fi
-if [ -n "${MAX_VAL_SAMPLES:-}" ]; then
-  DATAMODULE_ARGS+=(datamodule.max_val_samples="${MAX_VAL_SAMPLES}")
-fi
-if [ -n "${MAX_TEST_SAMPLES:-}" ]; then
-  DATAMODULE_ARGS+=(datamodule.max_test_samples="${MAX_TEST_SAMPLES}")
 fi
 
 EXTRA_ARGS=("$@")
