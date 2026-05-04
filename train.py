@@ -147,7 +147,7 @@ def main(cfg: DictConfig):
         backbone = TextSeq2SeqBackbone(
             src_vocab_size=len(datamodule.tokenizer),
             tgt_vocab_size=len(datamodule.tokenizer),
-            embed_dim=cfg.model.embed_dim,
+            dim=cfg.model.embed_dim,
             num_heads=cfg.model.num_heads,
             depth=cfg.model.depth,
             mlp_ratio=cfg.model.mlp_ratio,
