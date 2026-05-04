@@ -136,7 +136,7 @@ def main(cfg: DictConfig):
 
         # 1. INITIALIZE DATAMODULE FIRST
         # This downloads the tokenizer and dataset so we can measure the vocab size
-        datamodule = Seq2SeqDataModule(cfg.datamodule)
+        datamodule = Seq2SeqDataModule(**cfg.datamodule)
 
         # 2. INITIALIZE BACKBONE SECOND
         # Now we can safely call len(datamodule.tokenizer)
