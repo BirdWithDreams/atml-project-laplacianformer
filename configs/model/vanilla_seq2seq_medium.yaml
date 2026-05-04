@@ -1,0 +1,19 @@
+name: "vanilla_seq2seq_medium"
+backbone_type: "text_seq2seq"
+attn_type: "vanilla"
+
+# Vocabulary sizes (Standard T5 tokenizer size)
+src_vocab_size: 32128
+tgt_vocab_size: 32128
+
+# Medium Transformer dimensions (The standard 'Base' scale)
+embed_dim: 512
+num_heads: 8
+depth: 6
+mlp_ratio: 4.0
+
+# Laplacian-specific defaults (ignored if attn_type is "vanilla")
+lambda_scale: 4.0
+ns_iters: 5
+
+dropout: 0.1

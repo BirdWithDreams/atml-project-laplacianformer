@@ -1,0 +1,19 @@
+name: "vanilla_seq2seq_small"
+backbone_type: "text_seq2seq"
+attn_type: "vanilla"
+
+# Vocabulary sizes
+src_vocab_size: 32128
+tgt_vocab_size: 32128
+
+# Smaller Transformer dimensions
+embed_dim: 256
+num_heads: 4
+depth: 4
+mlp_ratio: 4.0
+
+# Laplacian-specific defaults
+lambda_scale: 4.0
+ns_iters: 5
+
+dropout: 0.1
