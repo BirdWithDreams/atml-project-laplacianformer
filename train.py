@@ -131,16 +131,34 @@ def main(cfg: DictConfig):
         num_classes = cfg.datamodule.num_classes
     elif cfg.task.name == "generation_nlp":
         from src.tasks.generation_nlp import NLPGenerationTask
+        from src.datamodules.seq2seq_datamodule import Seq2SeqDataModule
+        from src.models.text_seq2seq import TextSeq2SeqBackbone        
+
+        # 1. INITIALIZE DATAMODULE FIRST
+        # This downloads the tokenizer and dataset so we can measure the vocab size
+        datamodule = Seq2SeqDataModule(cfg.datamodule)
+
+        # 2. INITIALIZE BACKBONE SECOND
+        # Now we can safely call len(datamodule.tokenizer)
+        backbone = TextSeq2SeqBackbone(
+            src_vocab_size=len(datamodule.tokenizer),
+            tgt_vocab_size=len(datamodule.tokenizer),
+            embed_dim=cfg.model.embed_dim,
+            num_heads=cfg.model.num_heads,
+            depth=cfg.model.depth,
+            mlp_ratio=cfg.model.mlp_ratio,
+            attn_type=cfg.model.attn_type,
+            lambda_scale=cfg.model.get("lambda_scale", 4.0),
+            ns_iters=cfg.model.get("ns_iters", 5),
+            dropout=cfg.model.get("dropout", 0.1)
+        )
+
+        # 3. INITIALIZE LIGHTNING TASK THIRD
+        # Wrap the backbone in your LightningModule (adjust 'GenerationNLPTask' if you named it differently)
         task = NLPGenerationTask(
-            vocab_size=len(datamodule.tokenizer),
-            lr=lr,
-            weight_decay=weight_decay,
-            optimizer=optimizer_name,
-            model_cfg=model_cfg,
-            pad_token_id=datamodule.tokenizer.pad_token_id,
-            bos_token_id=datamodule.tokenizer.bos_token_id or datamodule.tokenizer.pad_token_id,
-            eos_token_id=datamodule.tokenizer.eos_token_id,
-            tokenizer=datamodule.tokenizer  
+            model=backbone,
+            cfg=cfg,
+            tokenizer=datamodule.tokenizer # Passing this is helpful for calculating ROUGE scores later
         )
         
     else:
