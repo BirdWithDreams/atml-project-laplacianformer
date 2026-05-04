@@ -93,6 +93,22 @@ uv run python download_sample.py
 uv run train.py task=cv_classification model=vanilla_pvt_small datamodule=imagenet
 ```
 
+Visualize Attention Maps (Vanilla vs. Laplacian):
+You can generate side-by-side heatmaps to compare how the different kernels distribute attention weights. This script supports both images and text and outputs a `.png` file.
+
+1. For Computer Vision (Provide a path to an image):
+```bash
+uv run python scripts/visualize_attention.py --mode vision --data_path "./data/imagenette2-320/train/n01440764/ILSVRC2012_val_00000293.JPEG"
+```
+
+2. For NLP (Provide a text prompt wrapped in quotes):
+
+```bash
+uv run python scripts/visualize_attention.py --mode text --data_path "The Laplacian kernel decays slower than Gaussian, allowing the network to retain distant context."
+```
+
+
+
 ## Matrix Scripts
 
 NER matrix:
