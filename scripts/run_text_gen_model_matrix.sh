@@ -84,7 +84,7 @@ for dataset in "${DATASET_LIST[@]}"; do
           echo "================================================================"
 
           if ! "${TRAIN_CMD_LIST[@]}" train.py \
-            task=nlp_generation \
+            task=generation_nlp \
             datamodule="${dataset}" \
             "${MODEL_ARGS[@]}" \
             optimizer="${optimizer}" \
