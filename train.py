@@ -150,7 +150,6 @@ def main(cfg: DictConfig):
             dim=cfg.model.embed_dim,
             num_heads=cfg.model.num_heads,
             depth=cfg.model.depth,
-            mlp_ratio=cfg.model.mlp_ratio,
             attn_type=cfg.model.attn_type,
             lambda_scale=cfg.model.get("lambda_scale", 4.0),
             ns_iters=cfg.model.get("ns_iters", 5),
