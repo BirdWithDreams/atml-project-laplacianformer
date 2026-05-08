@@ -1,0 +1,4 @@
+name: "adamw_text_scratch"
+optimizer: "AdamW"
+lr: 3e-4
+weight_decay: 0.01

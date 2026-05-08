@@ -95,7 +95,17 @@ def main(cfg: DictConfig):
             dataset_name=cfg.datamodule.dataset_name,
             batch_size=cfg.datamodule.batch_size,
             num_workers=cfg.datamodule.num_workers,
-            max_length=cfg.datamodule.max_length
+            max_length=cfg.datamodule.max_length,
+            dataset_path=cfg.datamodule.get("dataset_path", None),
+            dataset_config_name=cfg.datamodule.get("dataset_config_name", None),
+            text_column=cfg.datamodule.get("text_column", None),
+            text_pair_column=cfg.datamodule.get("text_pair_column", None),
+            label_column=cfg.datamodule.get("label_column", "label"),
+            train_split=cfg.datamodule.get("train_split", "train"),
+            validation_split=cfg.datamodule.get("validation_split", None),
+            test_split=cfg.datamodule.get("test_split", "test"),
+            validation_size=cfg.datamodule.get("validation_size", 0.1),
+            subset_seed=cfg.datamodule.get("subset_seed", cfg.seed),
         )
         num_classes = cfg.datamodule.num_classes
     elif cfg.task.name == "ner_task":

@@ -1,0 +1,21 @@
+name: "ag_news"
+model_name: "bert-base-uncased"
+dataset_name: "ag_news"
+dataset_path: "fancyzhx/ag_news"
+dataset_config_name: null
+text_column: "text"
+label_column: "label"
+train_split: "train"
+validation_split: null
+test_split: "test"
+validation_size: 0.1
+subset_seed: 42
+batch_size: 64
+num_workers: 4
+max_length: 128
+num_classes: 4
+label_names:
+  - "World"
+  - "Sports"
+  - "Business"
+  - "Sci/Tech"
