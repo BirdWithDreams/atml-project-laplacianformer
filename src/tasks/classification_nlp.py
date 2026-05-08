@@ -18,7 +18,8 @@ class NLPClassificationTask(L.LightningModule):
             optimizer: str = "AdamW",
             model_cfg: dict = None,
             vocab_size: int = 30522,
-            max_seq_len: int = 128
+            max_seq_len: int = 128,
+            label_smoothing: float = 0.0,
             ):
         super().__init__()
         self.save_hyperparameters()
@@ -38,11 +39,12 @@ class NLPClassificationTask(L.LightningModule):
             pool_ratio=model_cfg.get("pool_ratio", 2),
             ns_iters=model_cfg.get("ns_iters", 5),
             laplacian_backend=model_cfg.get("laplacian_backend", "cuda_1d"),
+            dropout=model_cfg.get("dropout", 0.0),
         )
 
         dim = model_cfg.get("dim", 384)
         self.head = nn.Linear(dim, num_classes)
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
 
         # Metrics
         self.train_acc = MulticlassAccuracy(num_classes=num_classes)
