@@ -2,10 +2,14 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 from hydra.core.hydra_config import HydraConfig
 import lightning as L
+from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
 from loguru import logger
 import sys
 import logging
+from datetime import datetime
+from pathlib import Path
+import re
 
 import torch
 torch.set_float32_matmul_precision('high')
@@ -69,6 +73,43 @@ def get_accumulate_grad_batches(cfg: DictConfig) -> int:
             f"got {accumulate_grad_batches}."
         )
     return accumulate_grad_batches
+
+
+def sanitize_path_component(value: str) -> str:
+    value = str(value).strip()
+    value = re.sub(r"[^A-Za-z0-9_.=-]+", "_", value)
+    value = value.strip("._")
+    return value or "unnamed"
+
+
+def build_checkpoint_callback(cfg: DictConfig) -> ModelCheckpoint:
+    checkpoint_dir = cfg.logger.get("checkpoint_dir", None)
+    if checkpoint_dir is None:
+        run_name = sanitize_path_component(str(cfg.logger.name))
+        project_name = sanitize_path_component(str(cfg.logger.project))
+        checkpoint_root = Path(str(cfg.logger.save_dir)) / project_name / run_name
+
+        if cfg.logger.get("checkpoint_add_timestamp", True):
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            checkpoint_root = checkpoint_root / timestamp
+
+        checkpoint_dir = checkpoint_root / "checkpoints"
+
+    checkpoint_callback_kwargs = {
+        "dirpath": str(checkpoint_dir),
+        "filename": cfg.logger.get("checkpoint_filename", "epoch={epoch}-step={step}"),
+        "save_top_k": int(cfg.logger.get("checkpoint_save_top_k", 1)),
+        "save_last": bool(cfg.logger.get("checkpoint_save_last", True)),
+        "auto_insert_metric_name": bool(
+            cfg.logger.get("checkpoint_auto_insert_metric_name", False)
+        ),
+    }
+    monitor = cfg.logger.get("checkpoint_monitor", None)
+    if monitor is not None:
+        checkpoint_callback_kwargs["monitor"] = monitor
+        checkpoint_callback_kwargs["mode"] = cfg.logger.get("checkpoint_mode", "min")
+
+    return ModelCheckpoint(**checkpoint_callback_kwargs)
 
 
 @hydra.main(version_base="1.3", config_path="configs", config_name="config")
@@ -263,6 +304,8 @@ def main(cfg: DictConfig):
 
     # 4. Setup Trainer
     accumulate_grad_batches = get_accumulate_grad_batches(cfg)
+    checkpoint_callback = build_checkpoint_callback(cfg)
+    logger.info(f"Saving checkpoints to: {checkpoint_callback.dirpath}")
     logger.info(
         "Using gradient accumulation: "
         f"{accumulate_grad_batches} step(s) with datamodule.batch_size={cfg.datamodule.batch_size}"
@@ -275,6 +318,7 @@ def main(cfg: DictConfig):
         accumulate_grad_batches=accumulate_grad_batches,
         log_every_n_steps=cfg.trainer.log_every_n_steps,
         logger=wandb_logger,
+        callbacks=[checkpoint_callback],
     )
 
     # 5. Train
