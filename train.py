@@ -1,10 +1,15 @@
 import hydra
 from omegaconf import DictConfig, OmegaConf
+from hydra.core.hydra_config import HydraConfig
 import lightning as L
+from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
 from loguru import logger
 import sys
 import logging
+from datetime import datetime
+from pathlib import Path
+import re
 
 import torch
 torch.set_float32_matmul_precision('high')
@@ -28,6 +33,84 @@ class InterceptHandler(logging.Handler):
 def setup_loguru():
     logging.basicConfig(handlers=[InterceptHandler()], level=logging.INFO, force=True)
     logger.configure(handlers=[{"sink": sys.stdout, "level": "INFO"}])
+
+
+def build_wandb_tags(cfg: DictConfig) -> list[str]:
+    automatic_tags = []
+
+    if HydraConfig.initialized():
+        choices = HydraConfig.get().runtime.choices
+        for group_name in ("task", "model", "datamodule", "optimizer", "trainer"):
+            choice = choices.get(group_name)
+            if choice:
+                automatic_tags.append(f"{group_name}:{choice}")
+
+    # Fall back to explicit config names for contexts where Hydra runtime
+    # choices are unavailable, such as direct unit tests.
+    for group_name in ("task", "model", "datamodule", "optimizer"):
+        group_cfg = cfg.get(group_name)
+        group_value = group_cfg.get("name") if group_cfg is not None else None
+        if group_value:
+            automatic_tags.append(f"{group_name}:{group_value}")
+
+    extra_tags = cfg.logger.get("extra_tags", [])
+    tags = []
+    seen = set()
+    for tag in [*automatic_tags, *extra_tags]:
+        tag = str(tag).strip()
+        if tag and tag not in seen:
+            tags.append(tag)
+            seen.add(tag)
+
+    return tags
+
+
+def get_accumulate_grad_batches(cfg: DictConfig) -> int:
+    accumulate_grad_batches = int(cfg.trainer.get("accumulate_grad_batches", 1))
+    if accumulate_grad_batches < 1:
+        raise ValueError(
+            "trainer.accumulate_grad_batches must be a positive integer, "
+            f"got {accumulate_grad_batches}."
+        )
+    return accumulate_grad_batches
+
+
+def sanitize_path_component(value: str) -> str:
+    value = str(value).strip()
+    value = re.sub(r"[^A-Za-z0-9_.=-]+", "_", value)
+    value = value.strip("._")
+    return value or "unnamed"
+
+
+def build_checkpoint_callback(cfg: DictConfig) -> ModelCheckpoint:
+    checkpoint_dir = cfg.logger.get("checkpoint_dir", None)
+    if checkpoint_dir is None:
+        run_name = sanitize_path_component(str(cfg.logger.name))
+        project_name = sanitize_path_component(str(cfg.logger.project))
+        checkpoint_root = Path(str(cfg.logger.save_dir)) / project_name / run_name
+
+        if cfg.logger.get("checkpoint_add_timestamp", True):
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            checkpoint_root = checkpoint_root / timestamp
+
+        checkpoint_dir = checkpoint_root / "checkpoints"
+
+    checkpoint_callback_kwargs = {
+        "dirpath": str(checkpoint_dir),
+        "filename": cfg.logger.get("checkpoint_filename", "epoch={epoch}-step={step}"),
+        "save_top_k": int(cfg.logger.get("checkpoint_save_top_k", 1)),
+        "save_last": bool(cfg.logger.get("checkpoint_save_last", True)),
+        "auto_insert_metric_name": bool(
+            cfg.logger.get("checkpoint_auto_insert_metric_name", False)
+        ),
+    }
+    monitor = cfg.logger.get("checkpoint_monitor", None)
+    if monitor is not None:
+        checkpoint_callback_kwargs["monitor"] = monitor
+        checkpoint_callback_kwargs["mode"] = cfg.logger.get("checkpoint_mode", "min")
+
+    return ModelCheckpoint(**checkpoint_callback_kwargs)
+
 
 @hydra.main(version_base="1.3", config_path="configs", config_name="config")
 def main(cfg: DictConfig):
@@ -53,17 +136,48 @@ def main(cfg: DictConfig):
             dataset_name=cfg.datamodule.dataset_name,
             batch_size=cfg.datamodule.batch_size,
             num_workers=cfg.datamodule.num_workers,
-            max_length=cfg.datamodule.max_length
+            max_length=cfg.datamodule.max_length,
+            dataset_path=cfg.datamodule.get("dataset_path", None),
+            dataset_config_name=cfg.datamodule.get("dataset_config_name", None),
+            text_column=cfg.datamodule.get("text_column", None),
+            text_pair_column=cfg.datamodule.get("text_pair_column", None),
+            label_column=cfg.datamodule.get("label_column", "label"),
+            train_split=cfg.datamodule.get("train_split", "train"),
+            validation_split=cfg.datamodule.get("validation_split", None),
+            test_split=cfg.datamodule.get("test_split", "test"),
+            validation_size=cfg.datamodule.get("validation_size", 0.1),
+            subset_seed=cfg.datamodule.get("subset_seed", cfg.seed),
         )
         num_classes = cfg.datamodule.num_classes
     elif cfg.task.name == "ner_task":
         from src.datamodules.ner_datamodule import NERDataModule
         datamodule = NERDataModule(
-            model_name=cfg.datamodule.get("model_name", "bert-base-cased"),
             dataset_name=cfg.datamodule.dataset_name,
             batch_size=cfg.datamodule.batch_size,
             num_workers=cfg.datamodule.num_workers,
-            max_length=cfg.datamodule.max_length
+            max_length=cfg.datamodule.max_length,
+            label_column=cfg.datamodule.get("label_column", None),
+            min_freq=cfg.datamodule.get("min_freq", 1),
+            unk_replace_prob=cfg.datamodule.get("unk_replace_prob", 0.01),
+        )
+        label_names = datamodule.get_label_names()
+        num_classes = len(label_names)
+    elif cfg.task.name == "semantic_segmentation":
+        from src.datamodules.segmentation_datamodule import SegmentationDataModule
+        datamodule = SegmentationDataModule(
+            data_dir=cfg.datamodule.get("data_dir", "./data"),
+            dataset_name=cfg.datamodule.dataset_name,
+            batch_size=cfg.datamodule.batch_size,
+            num_workers=cfg.datamodule.num_workers,
+            image_size=cfg.model.get("img_size", cfg.datamodule.get("image_size", 224)),
+            num_classes=cfg.datamodule.num_classes,
+            ignore_index=cfg.datamodule.get("ignore_index", 255),
+            download=cfg.datamodule.get("download", True),
+            coco_year=cfg.datamodule.get("coco_year", "2017"),
+            max_train_samples=cfg.datamodule.get("max_train_samples", None),
+            max_val_samples=cfg.datamodule.get("max_val_samples", None),
+            max_test_samples=cfg.datamodule.get("max_test_samples", None),
+            subset_seed=cfg.datamodule.get("subset_seed", cfg.seed),
         )
         num_classes = cfg.datamodule.num_classes
     else:
@@ -94,20 +208,11 @@ def main(cfg: DictConfig):
             model_cfg=model_cfg,
             vocab_size=len(datamodule.tokenizer),
             max_seq_len=cfg.datamodule.max_length,
+            label_smoothing=cfg.task.get("label_smoothing", 0.0),
         )
     elif cfg.task.name == "ner_task":
         from src.tasks.ner_task import NERTask
-        from datasets import load_dataset
-        
-        # Grab class names to properly inform seqeval about BIO tags
-        ds = load_dataset(cfg.datamodule.dataset_name, split="train")
-        # Most datasets use either 'ner_tags' or 'tags'
-        tag_col = "ner_tags" if "ner_tags" in ds.features else "tags" if "tags" in ds.features else None
-        
-        id2label = None
-        if tag_col and hasattr(ds.features[tag_col], "feature"):
-            class_names = ds.features[tag_col].feature.names
-            id2label = {i: v for i, v in enumerate(class_names)}
+        id2label = {i: label for i, label in enumerate(label_names)}
 
         task = NERTask(
             num_classes=num_classes,
@@ -115,28 +220,60 @@ def main(cfg: DictConfig):
             weight_decay=weight_decay,
             optimizer=optimizer_name,
             model_cfg=model_cfg,
-            vocab_size=len(datamodule.tokenizer),
+            vocab_size=datamodule.vocab_size,
             max_seq_len=cfg.datamodule.max_length,
             id2label=id2label
         )
+    elif cfg.task.name == "semantic_segmentation":
+        from src.tasks.segmentation import SemanticSegmentationTask
+        task = SemanticSegmentationTask(
+            num_classes=num_classes,
+            lr=lr,
+            weight_decay=weight_decay,
+            optimizer=optimizer_name,
+            model_cfg=model_cfg,
+            ignore_index=cfg.datamodule.get("ignore_index", 255),
+            log_segmentation_images=cfg.logger.get("log_segmentation_images", True),
+            num_log_segmentation_images=cfg.logger.get("num_log_segmentation_images", 4),
+            log_segmentation_images_every_n_epochs=cfg.logger.get(
+                "log_segmentation_images_every_n_epochs",
+                1,
+            ),
+        )
 
-    # task = torch.compile(task)
+    if cfg.trainer.get("compile", True):
+        task = torch.compile(task)
 
     # 3. Setup Logger
+    wandb_tags = build_wandb_tags(cfg)
+    logger.info(f"Using W&B tags: {wandb_tags}")
     wandb_logger = WandbLogger(
         project=cfg.logger.project,
+        entity=cfg.logger.get("entity", None),
         name=cfg.logger.name,
-        config=OmegaConf.to_container(cfg, resolve=True)
+        tags=wandb_tags,
+        config=OmegaConf.to_container(cfg, resolve=True),
+        save_dir=cfg.logger.save_dir,
     )
 
     # 4. Setup Trainer
+    accumulate_grad_batches = get_accumulate_grad_batches(cfg)
+    checkpoint_callback = build_checkpoint_callback(cfg)
+    logger.info(f"Saving checkpoints to: {checkpoint_callback.dirpath}")
+    logger.info(
+        "Using gradient accumulation: "
+        f"{accumulate_grad_batches} step(s) with datamodule.batch_size={cfg.datamodule.batch_size}"
+    )
     trainer = L.Trainer(
         max_epochs=cfg.trainer.max_epochs,
         accelerator=cfg.trainer.accelerator,
         devices=cfg.trainer.devices,
         precision=cfg.trainer.precision,
+        accumulate_grad_batches=accumulate_grad_batches,
+        gradient_clip_val=cfg.trainer.get("gradient_clip_val", None),
         log_every_n_steps=cfg.trainer.log_every_n_steps,
         logger=wandb_logger,
+        callbacks=[checkpoint_callback],
     )
 
     # 5. Train

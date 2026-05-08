@@ -11,7 +11,7 @@ datamodule:
 
 trainer:
   max_epochs: 12
-  precision: 32
+  precision: 16
   accumulate_grad_batches: 8
   gradient_clip_val: 1.0
 

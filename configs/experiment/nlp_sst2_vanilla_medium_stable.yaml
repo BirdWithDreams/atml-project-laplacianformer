@@ -8,7 +8,7 @@ defaults:
 
 trainer:
   max_epochs: 14
-  precision: 32
+  precision: 16
   accumulate_grad_batches: 4
   gradient_clip_val: 1.0
 
