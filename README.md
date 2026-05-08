@@ -92,6 +92,49 @@ NLP classification matrix:
 scripts/run_nlp_classification_model_matrix.sh
 ```
 
+## Benchmarking Checkpoints
+
+`benchmark.py` evaluates Lightning checkpoints on a deterministic test subset and
+writes JSONL/CSV summaries with metrics, forward-only inference time, and memory:
+
+```bash
+uv run python benchmark.py \
+  'runs=[{name:ag_news_vanilla,task:nlp_classification,datamodule:ag_news,checkpoint_path:results/path/to/checkpoint.ckpt}]'
+```
+
+For multiple checkpoints, use a glob:
+
+```bash
+uv run python benchmark.py \
+  'runs=[{name:ag_news_matrix,task:nlp_classification,datamodule:ag_news,checkpoint_glob:results/**/last.ckpt}]'
+```
+
+Defaults live in `configs/benchmark/default.yaml`. Common overrides:
+`max_samples=2048`, `warmup_batches=10`, `device=cuda`, and per-run
+`datamodule_overrides={batch_size:32,num_workers:0}`.
+
+A single benchmark config can mix tasks:
+
+```yaml
+runs:
+  - name: cifar100_vanilla
+    task: cv_classification
+    datamodule: cifar100
+    checkpoint_path: results/cifar100.ckpt
+  - name: ag_news_vanilla
+    task: nlp_classification
+    datamodule: ag_news
+    checkpoint_path: results/ag_news.ckpt
+  - name: conll2003_vanilla
+    task: ner_task
+    datamodule: conll2003
+    checkpoint_path: results/conll2003.ckpt
+  - name: voc2012_vanilla
+    task: semantic_segmentation
+    datamodule: voc2012_segmentation
+    checkpoint_path: results/voc2012.ckpt
+```
+
 Or with `screen` (preffered):
 ```bash
 LOG="./logs/ner_log_$(date +%Y%m%d_%H%M%S).log" && screen -S ner_run -L -Logfile "$LOG" -dm bash -lc 'cd /workspace/atml-project-laplacianformer && source .venv/bin/activate && bash scripts/run_ner_model_matrix.sh'
