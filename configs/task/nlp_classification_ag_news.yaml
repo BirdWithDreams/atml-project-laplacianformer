@@ -2,10 +2,12 @@
 defaults:
   - override /optimizer: adamw_text_scratch
   - override /model: vanilla_1d_small
-  - override /datamodule: sst2
+  - override /datamodule: ag_news
 
 task:
   name: "nlp_classification"
 
 trainer:
-  accumulate_grad_batches: 4
+  max_epochs: 10
+  accumulate_grad_batches: 2
+  precision: 32

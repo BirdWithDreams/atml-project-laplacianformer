@@ -63,6 +63,7 @@ Text classification:
 ```bash
 uv run train.py task=nlp_classification model=vanilla_1d_small datamodule=sst2
 uv run train.py task=nlp_classification model=laplacian_1d_cuda_small datamodule=sst2 trainer.precision=32
+uv run train.py task=nlp_classification_ag_news
 ```
 
 NER:
@@ -123,12 +124,19 @@ Segmentation matrix:
 scripts/run_segmentation_model_matrix.sh
 ```
 
+NLP classification matrix:
+
+```bash
+scripts/run_nlp_classification_model_matrix.sh
+```
+
 Or with `screen` (preffered):
 ```bash
 LOG="./logs/ner_log_$(date +%Y%m%d_%H%M%S).log" && screen -S ner_run -L -Logfile "$LOG" -dm bash -lc 'cd /workspace/atml-project-laplacianformer && source .venv/bin/activate && bash scripts/run_ner_model_matrix.sh'
 LOG="./logs/ner_log_$(date +%Y%m%d_%H%M%S).log" && screen -S ner_run -L -Logfile "$LOG" -dm bash -lc 'cd /workspace/atml-project-laplacianformer && source .venv/bin/activate && bash scripts/run_ner_gen2_model_matrix.sh --skip 3'
 
 LOG="./logs/seg_log_$(date +%Y%m%d_%H%M%S).log" && screen -S seg_run -L -Logfile "$LOG" -dm bash -lc 'cd /workspace/atml-project-laplacianformer && source .venv/bin/activate && bash scripts/run_segmentation_model_matrix.sh --skip 4'
+LOG="./logs/nlp_log_$(date +%Y%m%d_%H%M%S).log" && screen -S nlp_run -L -Logfile "$LOG" -dm bash -lc 'cd /workspace/atml-project-laplacianformer && source .venv/bin/activate && bash scripts/run_nlp_classification_model_matrix.sh'
 ```
 
 Both scripts accept space-separated environment overrides, for example:

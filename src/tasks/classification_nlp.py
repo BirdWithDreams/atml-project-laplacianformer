@@ -1,7 +1,12 @@
 import lightning as L
 import torch
 import torch.nn as nn
-from torchmetrics.classification import MulticlassAccuracy, MulticlassPrecision, MulticlassRecall
+from torchmetrics.classification import (
+    MulticlassAccuracy,
+    MulticlassF1Score,
+    MulticlassPrecision,
+    MulticlassRecall,
+)
 from src.models.text import TextBackbone
 
 class NLPClassificationTask(L.LightningModule):
@@ -44,6 +49,11 @@ class NLPClassificationTask(L.LightningModule):
         self.val_acc = MulticlassAccuracy(num_classes=num_classes)
         self.val_prec = MulticlassPrecision(num_classes=num_classes, average="macro")
         self.val_rec = MulticlassRecall(num_classes=num_classes, average="macro")
+        self.val_f1 = MulticlassF1Score(num_classes=num_classes, average="macro")
+        self.test_acc = MulticlassAccuracy(num_classes=num_classes)
+        self.test_prec = MulticlassPrecision(num_classes=num_classes, average="macro")
+        self.test_rec = MulticlassRecall(num_classes=num_classes, average="macro")
+        self.test_f1 = MulticlassF1Score(num_classes=num_classes, average="macro")
 
     def forward(self, input_ids, attention_mask=None):
         features = self.backbone(input_ids, attention_mask)
@@ -74,11 +84,13 @@ class NLPClassificationTask(L.LightningModule):
         self.val_acc(logits, labels)
         self.val_prec(logits, labels)
         self.val_rec(logits, labels)
+        self.val_f1(logits, labels)
 
         self.log("val/loss", loss, prog_bar=True)
         self.log("val/acc", self.val_acc, prog_bar=True)
         self.log("val/precision", self.val_prec)
         self.log("val/recall", self.val_rec)
+        self.log("val/f1", self.val_f1, prog_bar=True)
 
     def test_step(self, batch, batch_idx):
         input_ids = batch["input_ids"]
@@ -89,7 +101,16 @@ class NLPClassificationTask(L.LightningModule):
 
         logits = self(input_ids, attention_mask)
         loss = self.criterion(logits, labels)
+        self.test_acc(logits, labels)
+        self.test_prec(logits, labels)
+        self.test_rec(logits, labels)
+        self.test_f1(logits, labels)
+
         self.log("test/loss", loss)
+        self.log("test/acc", self.test_acc, prog_bar=True)
+        self.log("test/precision", self.test_prec)
+        self.log("test/recall", self.test_rec)
+        self.log("test/f1", self.test_f1, prog_bar=True)
 
     def configure_optimizers(self):
         if self.hparams.optimizer == "AdamW":
@@ -97,7 +118,9 @@ class NLPClassificationTask(L.LightningModule):
                 self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay
             )
         else:
-            optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
+            optimizer = torch.optim.Adam(
+                self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay
+            )
             
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=self.trainer.max_epochs)
         
