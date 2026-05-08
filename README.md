@@ -2,121 +2,11 @@
 
 This repository is a research codebase for comparing standard softmax attention against Laplacian linear attention from *LaplacianFormer: Rethinking Linear Attention with Laplacian Kernel*.
 
-The project now serves two purposes:
-
-- paper-oriented computer vision experiments
-- extension experiments in NLP and NER
-
-The current best paper match is the PVT-style vision backbone with RoPE and Laplacian attention. The older ViT-like vision models and the NLP/NER models are still useful, but they should be treated as baselines or extensions rather than as the closest reproduction of the paper.
-
-For model-specific architecture notes, see [src/models/README.md](</D:/Studying/USI MAI/atml-project/src/models/README.md:1>).
-
-## Project Layout
-
-- `src/models/`: reusable backbones and attention modules
-- `src/tasks/`: Lightning tasks for CV classification, NLP classification, and NER
-- `src/datamodules/`: dataset wrappers for CIFAR-100, SST-2, CoNLL-2003, and OntoNotes 5
-- `configs/`: Hydra configuration groups
-- `scripts/`: convenience scripts for experiment sweeps
-- `train.py`: Hydra entrypoint that composes the config and launches training
-
-## Model Families
-
-### Vision
-
-- `vision.py` and `vit_wrapper.py`: flat ViT-like baselines
-- `pvt.py`: hierarchical PVT-style backbone with optional RoPE
-- `laplacian_attn.py`: 2D Laplacian attention for vision
-- `rope.py`: 2D rotary positional encoding utilities
-
-Best paper match:
-
-- `model=laplacian_pvt_tiny`
-- `model=laplacian_pvt_small`
-
-### Text and NER
-
-- `text.py`: sequence classification backbone
-- `text_ner.py`: token classification backbone for NER
-- `laplacian_attn.py`: 1D Laplacian attention with padding-mask support
-- `vanilla_attn.py`: standard softmax attention baseline
-
-These are project extensions, not part of the original paper reproduction claim.
-
-## Hydra Config Structure
-
-The config tree is now organized by concern:
-
-- `configs/config.yaml`: root composition entrypoint
-- `configs/task/`: task identity and task-level defaults
-- `configs/model/`: architecture presets
-- `configs/datamodule/`: dataset and tokenizer settings
-- `configs/optimizer/`: optimizer presets
-- `configs/trainer/`: Lightning trainer settings
-- `configs/logger/`: logging backend settings
-
-At runtime, the composed config has these top-level groups:
-
-- `task`
-- `model`
-- `datamodule`
-- `optimizer`
-- `trainer`
-- `logger`
-
-Task configs override the default optimizer group through Hydra. For example:
-
-- `task=cv_classification` defaults to `optimizer=adamw_cv_default`
-- `task=ner_task` defaults to `optimizer=adamw_text_default`
-
-You can still override the optimizer explicitly from the CLI.
-
-## Model Presets
-
-### ViT-like Text and NER Presets
-
-Vanilla presets:
-
-- `vanilla_tiny`
-- `vanilla_small`
-- `vanilla_medium`
-
-Laplacian presets:
-
-- `laplacian_tiny`
-- `laplacian_small`
-- `laplacian_medium`
-
-These are the main size-controlled presets for NLP and NER experiments.
-
-### Vision-Oriented Presets
-
-- `vanilla`: legacy ViT-like vanilla baseline
-- `laplacian`: legacy ViT-like Laplacian baseline
-- `laplacian_pvt_tiny`: recommended paper-oriented vision config
-- `laplacian_pvt_small`: larger paper-oriented vision config
-- `laplacian_paper`: reference metadata config, not the best runnable architecture
-
-## Optimizer Presets
-
-The optimizer group currently includes:
-
-- `adamw_cv_default`
-- `adamw_text_default`
-- `adamw_text_high_lr`
-- `adam_text_baseline`
-
-These configs control:
-
-- optimizer type
-- learning rate
-- weight decay
-
-Example:
-
-```bash
-python train.py task=ner_task model=laplacian_small datamodule=conll2003 optimizer=adam_text_baseline
-```
+- `cv_classification`
+- `semantic_segmentation`
+- `nlp_classification`
+- `ner_task`
+- `generation_nlp`
 
 ## Environment Setup
 
@@ -143,8 +33,9 @@ source .venv/bin/activate
 Install dependencies with:
 
 ```bash
-python -m pip install --upgrade pip
-pip install -r requirements.txt
+uv run train.py task=nlp_classification model=vanilla_1d_small datamodule=sst2
+uv run train.py task=nlp_classification model=laplacian_1d_cuda_small datamodule=sst2 trainer.precision=32
+uv run train.py task=nlp_classification_ag_news
 ```
 
 ## Running Experiments
@@ -157,7 +48,46 @@ Legacy ViT-like vanilla baseline:
 python train.py task=cv_classification model=vanilla datamodule=cifar100
 ```
 
-Legacy ViT-like Laplacian baseline:
+Text Generation (Summarization/Translation):
+```bash
+uv run train.py task=generation_nlp model=vanilla_seq2seq_base datamodule=seq2seq
+
+uv run train.py task=generation_nlp model=vanilla_seq2seq_base model.attn_type=laplacian datamodule=seq2seq trainer.precision=32
+```
+
+ImageNet Sample (Imagenette) Classification:
+
+To test ImageNet classification without downloading the full 150GB dataset, you can fetch a 10-class sample (Imagenette).
+
+1. Download and extract the sample:
+```bash
+uv run python download_sample.py
+```
+
+2. Run the training task:
+```bash
+uv run train.py task=cv_classification model=vanilla_pvt_small datamodule=imagenet
+```
+
+Visualize Attention Maps (Vanilla vs. Laplacian):
+You can generate side-by-side heatmaps to compare how the different kernels distribute attention weights. This script supports both images and text and outputs a `.png` file.
+
+1. For Computer Vision (Provide a path to an image):
+```bash
+uv run python scripts/visualize_attention.py --mode vision --data_path "./data/imagenette2-320/train/n01440764/ILSVRC2012_val_00000293.JPEG"
+```
+
+2. For NLP (Provide a text prompt wrapped in quotes):
+
+```bash
+uv run python scripts/visualize_attention.py --mode text --data_path "The Laplacian kernel decays slower than Gaussian, allowing the network to retain distant context."
+```
+
+
+
+## Matrix Scripts
+
+NER matrix:
 
 ```bash
 python train.py task=cv_classification model=laplacian datamodule=cifar100
@@ -169,7 +99,72 @@ Best paper-oriented vision run:
 python train.py task=cv_classification model=laplacian_pvt_tiny datamodule=cifar100
 ```
 
+
 ### NLP Classification
+=======
+=======
+NLP classification matrix:
+
+```bash
+scripts/run_nlp_classification_model_matrix.sh
+```
+
+=======
+## Benchmarking Checkpoints
+
+`benchmark.py` evaluates Lightning checkpoints on a deterministic test subset and
+writes JSONL/CSV summaries with metrics, forward-only inference time, and memory:
+
+```bash
+uv run python benchmark.py \
+  'runs=[{name:ag_news_vanilla,task:nlp_classification,datamodule:ag_news,checkpoint_path:results/path/to/checkpoint.ckpt}]'
+```
+
+For multiple checkpoints, use a glob:
+
+```bash
+uv run python benchmark.py \
+  'runs=[{name:ag_news_matrix,task:nlp_classification,datamodule:ag_news,checkpoint_glob:results/**/last.ckpt}]'
+```
+
+Defaults live in `configs/benchmark/default.yaml`. Common overrides:
+`max_samples=2048`, `warmup_batches=10`, `device=cuda`, and per-run
+`datamodule_overrides={batch_size:32,num_workers:0}`.
+
+A single benchmark config can mix tasks:
+
+```yaml
+runs:
+  - name: cifar100_vanilla
+    task: cv_classification
+    datamodule: cifar100
+    checkpoint_path: results/cifar100.ckpt
+  - name: ag_news_vanilla
+    task: nlp_classification
+    datamodule: ag_news
+    checkpoint_path: results/ag_news.ckpt
+  - name: conll2003_vanilla
+    task: ner_task
+    datamodule: conll2003
+    checkpoint_path: results/conll2003.ckpt
+  - name: voc2012_vanilla
+    task: semantic_segmentation
+    datamodule: voc2012_segmentation
+    checkpoint_path: results/voc2012.ckpt
+```
+
+>>>>>>> 82c88df (Add checkpoint benchmark runner)
+Or with `screen` (preffered):
+```bash
+LOG="./logs/ner_log_$(date +%Y%m%d_%H%M%S).log" && screen -S ner_run -L -Logfile "$LOG" -dm bash -lc 'cd /workspace/atml-project-laplacianformer && source .venv/bin/activate && bash scripts/run_ner_model_matrix.sh'
+LOG="./logs/ner_log_$(date +%Y%m%d_%H%M%S).log" && screen -S ner_run -L -Logfile "$LOG" -dm bash -lc 'cd /workspace/atml-project-laplacianformer && source .venv/bin/activate && bash scripts/run_ner_gen2_model_matrix.sh --skip 3'
+
+LOG="./logs/seg_log_$(date +%Y%m%d_%H%M%S).log" && screen -S seg_run -L -Logfile "$LOG" -dm bash -lc 'cd /workspace/atml-project-laplacianformer && source .venv/bin/activate && bash scripts/run_segmentation_model_matrix.sh --skip 4'
+LOG="./logs/nlp_log_$(date +%Y%m%d_%H%M%S).log" && screen -S nlp_run -L -Logfile "$LOG" -dm bash -lc 'cd /workspace/atml-project-laplacianformer && source .venv/bin/activate && bash scripts/run_nlp_classification_model_matrix.sh'
+```
+
+Both scripts accept space-separated environment overrides, for example:
+>>>>>>> 17fd14d (Introduces  argument to segmentation batch script)
 
 ```bash
 python train.py task=nlp_classification model=laplacian_small datamodule=sst2
