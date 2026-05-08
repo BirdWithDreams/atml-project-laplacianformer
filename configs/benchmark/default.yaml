@@ -1,0 +1,27 @@
+seed: 42
+device: "auto"
+precision: 32
+compile: false
+fail_fast: false
+
+# Forward-only timing excludes data loading, host-to-device transfer, loss, and metric computation.
+warmup_batches: 5
+max_samples: 512
+max_batches: null
+subset_seed: 42
+subset_shuffle: true
+
+output_dir: "./results/benchmarks"
+output_jsonl: "benchmark_results.jsonl"
+output_csv: "benchmark_results.csv"
+
+# Each run must define:
+# - name
+# - task: cv_classification | nlp_classification | ner_task | semantic_segmentation
+# - datamodule: one config from configs/datamodule
+# - checkpoint_path, checkpoint_paths, or checkpoint_glob
+#
+# Optional per-run overrides:
+# - datamodule_overrides: {batch_size: 32, num_workers: 0}
+# - max_samples, max_batches, warmup_batches, precision, compile
+runs: []
