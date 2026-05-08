@@ -108,13 +108,20 @@ class NLPClassificationTask(L.LightningModule):
 
         logits = self(input_ids, attention_mask)
         loss = self.criterion(logits, labels)
+<<<<<<< HEAD
         batch_size = labels.shape[0]
+=======
+>>>>>>> ebf763a (Add support for NLP classification task and AG News dataset)
         self.test_acc(logits, labels)
         self.test_prec(logits, labels)
         self.test_rec(logits, labels)
         self.test_f1(logits, labels)
 
+<<<<<<< HEAD
         self.log("test/loss", loss, batch_size=batch_size)
+=======
+        self.log("test/loss", loss)
+>>>>>>> ebf763a (Add support for NLP classification task and AG News dataset)
         self.log("test/acc", self.test_acc, prog_bar=True)
         self.log("test/precision", self.test_prec)
         self.log("test/recall", self.test_rec)

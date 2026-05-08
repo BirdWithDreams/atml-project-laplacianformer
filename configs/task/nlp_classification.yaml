@@ -1,6 +1,12 @@
 # @package _global_
 defaults:
+<<<<<<< HEAD
   - override /optimizer: adamw_text_default
+=======
+  - override /optimizer: adamw_text_scratch
+  - override /model: vanilla_1d_small
+  - override /datamodule: sst2
+>>>>>>> ebf763a (Add support for NLP classification task and AG News dataset)
 
 task:
   name: "nlp_classification"
