@@ -1,0 +1,4 @@
+name: "adamw_text_large_lr5e_5"
+optimizer: "AdamW"
+lr: 5e-5
+weight_decay: 0.08
