@@ -1,0 +1,29 @@
+# @package _global_
+defaults:
+  - override /task: ner_task
+  - override /datamodule: conll2003
+  - override /model: vanilla_1d_medium_d8_dropout10
+  - override /optimizer: adam_text_lr7e_5
+  - override /trainer: default
+
+# Final CoNLL-2003 NER config.
+# The gen-2 runs show vanilla attention decisively beating Laplacian variants.
+# The 768-dim, 8-layer vanilla model is the best balanced choice across
+# PER/ORG/LOC/MISC, with modest dropout to counter the near-zero train loss.
+datamodule:
+  batch_size: 128
+  max_length: 128
+
+trainer:
+  max_epochs: 32
+  precision: 32
+  accumulate_grad_batches: 1
+  gradient_clip_val: 1.0
+
+logger:
+  project: "ner-final"
+  name: "final_ner_conll2003_vanilla_deep_medium"
+  extra_tags:
+    - "final:ner"
+    - "dataset:conll2003"
+    - "selection:entity_f1_balanced"

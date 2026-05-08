@@ -1,0 +1,31 @@
+# @package _global_
+defaults:
+  - override /task: nlp_classification
+  - override /datamodule: sst2
+  - override /model: vanilla_1d_large_1024_d8_dropout15
+  - override /optimizer: adamw_text_large_lr5e_5
+  - override /trainer: default
+
+# Best vanilla-family result from the recommended runs.
+# The large 1024x8 backbone gave the strongest validation accuracy/F1
+# without the collapse seen in the AG News Laplacian run.
+datamodule:
+  batch_size: 16
+
+trainer:
+  max_epochs: 12
+  precision: 16
+  accumulate_grad_batches: 8
+  gradient_clip_val: 1.0
+
+task:
+  name: "nlp_classification"
+  label_smoothing: 0.05
+
+logger:
+  project: "nlp-classification-final"
+  name: "final_nlp_sst2_vanilla_large_regularized"
+  extra_tags:
+    - "final:sst2"
+    - "model_type:vanilla"
+    - "selection:best_val_f1_acc"
