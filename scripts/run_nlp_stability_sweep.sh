@@ -36,7 +36,7 @@ fi
 
 DRY_RUN="${DRY_RUN:-false}"
 SEED="${SEED:-42}"
-WANDB_PROJECT="${WANDB_PROJECT:-nlp-classification-recommended}"
+WANDB_PROJECT="${WANDB_PROJECT:-nlp-classification-stability-sweep}"
 MAX_EPOCHS="${MAX_EPOCHS:-12}"
 RUN_PREFIX="${RUN_PREFIX:-stability}"
 SKIP_FIRST_N=0
