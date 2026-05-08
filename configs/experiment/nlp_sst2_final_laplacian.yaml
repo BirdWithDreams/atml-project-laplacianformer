@@ -1,0 +1,28 @@
+# @package _global_
+defaults:
+  - override /task: nlp_classification
+  - override /datamodule: sst2
+  - override /model: laplacian_1d_cuda_medium_lambda8_pool2_ns8_dropout10
+  - override /optimizer: adamw_text_stable_lr7e_5
+  - override /trainer: default
+
+# Best Laplacian-family result from the stability sweep.
+# lr=7e-5 + dropout=0.10 + label_smoothing=0.05 had the best validation
+# F1/accuracy among the Laplacian trials; keep fp32 for CUDA Laplacian ops.
+trainer:
+  max_epochs: 12
+  precision: 32
+  accumulate_grad_batches: 4
+  gradient_clip_val: 1.0
+
+task:
+  name: "nlp_classification"
+  label_smoothing: 0.05
+
+logger:
+  project: "nlp-classification-final"
+  name: "final_nlp_sst2_laplacian_medium_stable"
+  extra_tags:
+    - "final:sst2"
+    - "model_type:laplacian"
+    - "selection:best_val_f1_acc"

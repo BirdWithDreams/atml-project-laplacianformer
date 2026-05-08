@@ -1,0 +1,6 @@
+name: "vanilla_1d_medium_d8_dropout10"
+attn_type: "vanilla"
+dim: 768
+depth: 8
+num_heads: 12
+dropout: 0.10

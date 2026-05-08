@@ -11,11 +11,13 @@ class TextBackboneNER(nn.Module):
             dim=384, depth=6, num_heads=6, attn_type="vanilla",
             lambda_scale=4.0, pool_ratio=2, ns_iters=5,
             laplacian_backend="cuda_1d",
+            dropout=0.0,
             ):
         super().__init__()
         # Standard embedding
         self.token_embed = nn.Embedding(vocab_size, dim)
         self.pos_embed = nn.Embedding(max_seq_len, dim)
+        self.embed_dropout = nn.Dropout(dropout)
 
         attn_kwargs = {
             "lambda_scale": lambda_scale,
@@ -26,7 +28,7 @@ class TextBackboneNER(nn.Module):
         
         self.blocks = nn.ModuleList(
             [
-                TextTransformerBlock(dim, num_heads, attn_type, attn_kwargs)
+                TextTransformerBlock(dim, num_heads, attn_type, attn_kwargs, dropout)
                 for _ in range(depth)
             ]
         )
@@ -42,7 +44,7 @@ class TextBackboneNER(nn.Module):
         
         positions = torch.arange(0, seq_len, device=input_ids.device).unsqueeze(0).expand(B, seq_len)
         
-        x = self.token_embed(input_ids) + self.pos_embed(positions)
+        x = self.embed_dropout(self.token_embed(input_ids) + self.pos_embed(positions))
         if attention_mask is not None:
             x = x * attention_mask.unsqueeze(-1).to(dtype=x.dtype)
         
