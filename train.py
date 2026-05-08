@@ -167,6 +167,7 @@ def main(cfg: DictConfig):
             model_cfg=model_cfg,
             vocab_size=len(datamodule.tokenizer),
             max_seq_len=cfg.datamodule.max_length,
+            label_smoothing=cfg.task.get("label_smoothing", 0.0),
         )
     elif cfg.task.name == "ner_task":
         from src.tasks.ner_task import NERTask
@@ -226,6 +227,7 @@ def main(cfg: DictConfig):
         devices=cfg.trainer.devices,
         precision=cfg.trainer.precision,
         accumulate_grad_batches=accumulate_grad_batches,
+        gradient_clip_val=cfg.trainer.get("gradient_clip_val", None),
         log_every_n_steps=cfg.trainer.log_every_n_steps,
         logger=wandb_logger,
     )
