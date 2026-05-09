@@ -185,20 +185,13 @@ def main(cfg: DictConfig):
             subset_seed=cfg.datamodule.get("subset_seed", cfg.seed),
         )
         num_classes = cfg.datamodule.num_classes
-    elif cfg.task.name == "generation_nlp":
-        from src.tasks.generation_nlp import NLPGenerationTask
-        task = NLPGenerationTask(
-            vocab_size=len(datamodule.tokenizer),
-            lr=lr,
-            weight_decay=weight_decay,
-            optimizer=optimizer_name,
-            model_cfg=model_cfg,
-            pad_token_id=datamodule.tokenizer.pad_token_id,
-            bos_token_id=datamodule.tokenizer.bos_token_id or datamodule.tokenizer.pad_token_id,
-            eos_token_id=datamodule.tokenizer.eos_token_id,
-            tokenizer=datamodule.tokenizer  
+    elif cfg.task.name == "detection":
+        from src.datamodules.detection_datamodule import VOCDataModule
+        datamodule = VOCDataModule(
+            batch_size=cfg.datamodule.batch_size,
+            num_workers=cfg.datamodule.num_workers
         )
-        
+        num_classes = cfg.datamodule.num_classes
     else:
         raise ValueError(f"Unknown task: {cfg.task.name}")
 
@@ -287,8 +280,16 @@ def main(cfg: DictConfig):
             eos_token_id=datamodule.tokenizer.eos_token_id
         )
 
-    if cfg.trainer.get("compile", True):
-        task = torch.compile(task)
+    elif cfg.task.name == "detection":
+        from src.tasks.detection import ObjectDetectionTask
+        task = ObjectDetectionTask(
+            num_classes=num_classes,
+            lr=cfg.task.lr,
+            weight_decay=cfg.task.weight_decay,
+            optimizer=cfg.task.optimizer,
+            model_cfg=model_cfg
+        )
+    task = torch.compile(task)
 
     # 3. Setup Logger
     wandb_tags = build_wandb_tags(cfg)

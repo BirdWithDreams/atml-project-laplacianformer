@@ -1,0 +1,119 @@
+import lightning as L
+import torch
+import torch.nn as nn
+from torchvision.models.detection import FasterRCNN
+from torchvision.models.detection.rpn import AnchorGenerator
+from torchvision.ops import box_iou
+from src.models.vision import VisionBackbone
+
+
+class DetectionBackboneWrapper(nn.Module):
+    def __init__(self, backbone):
+        super().__init__()
+        self.backbone = backbone
+        self.out_channels = backbone.dim
+
+    def forward(self, x):
+        features = self.backbone.patch_embed(x)
+        for block in self.backbone.blocks:
+            features = block(features)
+        B, N, C = features.shape
+        H = W = int(N ** 0.5)
+        features = features.permute(0, 2, 1).reshape(B, C, H, W)
+        return {"0": features}
+
+
+class ObjectDetectionTask(L.LightningModule):
+    def __init__(
+            self,
+            num_classes: int = 21,
+            lr: float = 1e-4,
+            weight_decay: float = 0.0005,
+            optimizer: str = "AdamW",
+            model_cfg: dict = None
+            ):
+        super().__init__()
+        self.save_hyperparameters()
+
+        if model_cfg is None:
+            model_cfg = {"attn_type": "vanilla", "dim": 384, "depth": 6, "num_heads": 6}
+
+        vision_backbone = VisionBackbone(
+            img_size=224,
+            patch_size=16,
+            dim=model_cfg.get("dim", 384),
+            depth=model_cfg.get("depth", 6),
+            num_heads=model_cfg.get("num_heads", 6),
+            attn_type=model_cfg.get("attn_type", "vanilla")
+        )
+
+        wrapped_backbone = DetectionBackboneWrapper(vision_backbone)
+
+        anchor_generator = AnchorGenerator(
+            sizes=((32, 64, 128, 256, 512),),
+            aspect_ratios=((0.5, 1.0, 2.0),)
+        )
+
+        self.model = FasterRCNN(
+            backbone=wrapped_backbone,
+            num_classes=num_classes,
+            rpn_anchor_generator=anchor_generator,
+        )
+
+    def forward(self, images, targets=None):
+        return self.model(images, targets)
+
+    def training_step(self, batch, batch_idx):
+        images, targets = batch
+        images = list(images)
+        targets = list(targets)
+        loss_dict = self.model(images, targets)
+        loss = sum(loss for loss in loss_dict.values())
+        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        images, targets = batch
+        images = list(images)
+        preds = self.model(images)
+        total_iou = 0.0
+        count = 0
+        for pred, target in zip(preds, targets):
+            if len(pred["boxes"]) > 0 and len(target["boxes"]) > 0:
+                iou = box_iou(pred["boxes"], target["boxes"])
+                total_iou += iou.max(dim=1).values.mean().item()
+                count += 1
+        if count > 0:
+            self.log("val/mean_iou", total_iou / count, prog_bar=True)
+
+    def test_step(self, batch, batch_idx):
+        images, targets = batch
+        images = list(images)
+        preds = self.model(images)
+        total_iou = 0.0
+        count = 0
+        for pred, target in zip(preds, targets):
+            if len(pred["boxes"]) > 0 and len(target["boxes"]) > 0:
+                iou = box_iou(pred["boxes"], target["boxes"])
+                total_iou += iou.max(dim=1).values.mean().item()
+                count += 1
+        if count > 0:
+            self.log("test/mean_iou", total_iou / count)
+
+    def configure_optimizers(self):
+        if self.hparams.optimizer == "AdamW":
+            optimizer = torch.optim.AdamW(
+                self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay
+            )
+        else:
+            optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
+
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=self.trainer.max_epochs)
+
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "epoch",
+            },
+        }
