@@ -18,24 +18,34 @@ class NLPDataModule(L.LightningDataModule):
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     def prepare_data(self):
-        # Using GLUE benchmark's SST-2
-        load_dataset("glue", self.dataset_name)
+        if self.dataset_name == "ag_news":
+            load_dataset("ag_news")
+        else:
+            load_dataset("glue", self.dataset_name)
 
     def setup(self, stage=None):
-        dataset = load_dataset("glue", self.dataset_name)
-
-        def tokenize_function(examples):
-            return self.tokenizer(examples["sentence"], padding="max_length", truncation=True, max_length=self.max_length)
-
-        tokenized_datasets = dataset.map(tokenize_function, batched=True)
-        tokenized_datasets.set_format("torch", columns=["input_ids", "attention_mask", "label"])
-
-        if stage == "fit" or stage is None:
-            self.train_dataset = tokenized_datasets["train"]
-            self.val_dataset = tokenized_datasets["validation"]
-        
-        if stage == "test":
-            self.test_dataset = tokenized_datasets["test"]
+        if self.dataset_name == "ag_news":
+            dataset = load_dataset("ag_news")
+            def tokenize_function(examples):
+                return self.tokenizer(examples["text"], padding="max_length", truncation=True, max_length=self.max_length)
+            tokenized_datasets = dataset.map(tokenize_function, batched=True)
+            tokenized_datasets.set_format("torch", columns=["input_ids", "attention_mask", "label"])
+            if stage == "fit" or stage is None:
+                self.train_dataset = tokenized_datasets["train"]
+                self.val_dataset = tokenized_datasets["test"]
+            if stage == "test":
+                self.test_dataset = tokenized_datasets["test"]
+        else:
+            dataset = load_dataset("glue", self.dataset_name)
+            def tokenize_function(examples):
+                return self.tokenizer(examples["sentence"], padding="max_length", truncation=True, max_length=self.max_length)
+            tokenized_datasets = dataset.map(tokenize_function, batched=True)
+            tokenized_datasets.set_format("torch", columns=["input_ids", "attention_mask", "label"])
+            if stage == "fit" or stage is None:
+                self.train_dataset = tokenized_datasets["train"]
+                self.val_dataset = tokenized_datasets["validation"]
+            if stage == "test":
+                self.test_dataset = tokenized_datasets["test"]
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, pin_memory=True)
