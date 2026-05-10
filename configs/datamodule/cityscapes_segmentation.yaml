@@ -1,9 +1,11 @@
 name: "cityscapes_segmentation"
 dataset_name: "cityscapes"
 data_dir: "./data"
-batch_size: 16
+batch_size: 4
 num_workers: 8
-image_size: 224
+image_size: 320
+train_min_scale: 0.5
+train_max_scale: 2.0
 num_classes: 19
 ignore_index: 255
 download: false

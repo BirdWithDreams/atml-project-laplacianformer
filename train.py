@@ -170,6 +170,8 @@ def main(cfg: DictConfig):
             batch_size=cfg.datamodule.batch_size,
             num_workers=cfg.datamodule.num_workers,
             image_size=cfg.model.get("img_size", cfg.datamodule.get("image_size", 224)),
+            train_min_scale=cfg.datamodule.get("train_min_scale", 0.5),
+            train_max_scale=cfg.datamodule.get("train_max_scale", 2.0),
             num_classes=cfg.datamodule.num_classes,
             ignore_index=cfg.datamodule.get("ignore_index", 255),
             download=cfg.datamodule.get("download", True),
@@ -282,9 +284,11 @@ def main(cfg: DictConfig):
             ),
             focal_gamma=cfg.task.get("focal_gamma", 2.0),
             focal_alpha=cfg.task.get("focal_alpha", None),
+            class_weights=cfg.task.get("class_weights", None),
             focal_loss_weight=cfg.task.get("focal_loss_weight", 1.0),
             dice_loss_weight=cfg.task.get("dice_loss_weight", 1.0),
             dice_smooth=cfg.task.get("dice_smooth", 1e-5),
+            dice_present_classes_only=cfg.task.get("dice_present_classes_only", True),
         )
     elif cfg.task.name == "generation_nlp":
         from src.tasks.generation_nlp import NLPGenerationTask
