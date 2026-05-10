@@ -1,66 +1,51 @@
 import lightning as L
 import torch
-import torchvision
-import torchvision.transforms as transforms
-from torch.utils.data import DataLoader
+import torchvision.transforms.functional as F
+from torch.utils.data import DataLoader, Dataset
+from datasets import load_dataset
 
 
 def collate_fn(batch):
     return tuple(zip(*batch))
 
 
+class COCODetectionDataset(Dataset):
+    def __init__(self, hf_dataset):
+        self.dataset = hf_dataset
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        item = self.dataset[idx]
+        img = item["image"].convert("RGB")
+        img = F.to_tensor(img)
+
+        objects = item["objects"]
+        boxes = torch.tensor(objects["bbox"], dtype=torch.float32)
+        labels = torch.tensor(objects["category"], dtype=torch.int64)
+
+        if len(boxes) == 0:
+            boxes = torch.zeros((0, 4), dtype=torch.float32)
+            labels = torch.zeros((0,), dtype=torch.int64)
+
+        target = {"boxes": boxes, "labels": labels}
+        return img, target
+
+
 class VOCDataModule(L.LightningDataModule):
     def __init__(self, data_dir: str = "./data", batch_size: int = 4, num_workers: int = 4, dataset_name: str = "voc"):
         super().__init__()
-        self.data_dir = data_dir
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.transform = transforms.Compose([
-            transforms.ToTensor(),
-        ])
-
-    def prepare_data(self):
-        torchvision.datasets.VOCDetection(self.data_dir, year="2012", image_set="train", download=True)
-        torchvision.datasets.VOCDetection(self.data_dir, year="2012", image_set="val", download=True)
 
     def setup(self, stage=None):
-        if stage == "fit" or stage is None:
-            self.train_dataset = torchvision.datasets.VOCDetection(
-                self.data_dir, year="2012", image_set="train",
-                download=False, transforms=self._transforms()
-            )
-            self.val_dataset = torchvision.datasets.VOCDetection(
-                self.data_dir, year="2012", image_set="val",
-                download=False, transforms=self._transforms()
-            )
+        dataset = load_dataset("detection-datasets/coco", split="train[:5000]", trust_remote_code=True)
+        val_dataset = load_dataset("detection-datasets/coco", split="validation[:1000]", trust_remote_code=True)
 
-    def _transforms(self):
-        def transforms(img, target):
-            img = torchvision.transforms.functional.to_tensor(img)
-            boxes = []
-            labels = []
-            VOC_CLASSES = [
-                "background", "aeroplane", "bicycle", "bird", "boat", "bottle",
-                "bus", "car", "cat", "chair", "cow", "diningtable", "dog",
-                "horse", "motorbike", "person", "pottedplant", "sheep", "sofa",
-                "train", "tvmonitor"
-            ]
-            objects = target["annotation"]["object"]
-            if isinstance(objects, dict):
-                objects = [objects]
-            for obj in objects:
-                bbox = obj["bndbox"]
-                boxes.append([
-                    float(bbox["xmin"]), float(bbox["ymin"]),
-                    float(bbox["xmax"]), float(bbox["ymax"])
-                ])
-                labels.append(VOC_CLASSES.index(obj["name"]))
-            target = {
-                "boxes": torch.tensor(boxes, dtype=torch.float32),
-                "labels": torch.tensor(labels, dtype=torch.int64),
-            }
-            return img, target
-        return transforms
+        if stage == "fit" or stage is None:
+            self.train_dataset = COCODetectionDataset(dataset)
+            self.val_dataset = COCODetectionDataset(val_dataset)
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,
