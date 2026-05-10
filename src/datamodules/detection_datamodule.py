@@ -1,34 +1,31 @@
 import lightning as L
 import torch
+import torchvision
 import torchvision.transforms.functional as F
 from torch.utils.data import DataLoader, Dataset
-from datasets import load_dataset
+import numpy as np
 
 
 def collate_fn(batch):
     return tuple(zip(*batch))
 
 
-class COCODetectionDataset(Dataset):
-    def __init__(self, hf_dataset):
-        self.dataset = hf_dataset
+class FakeCOCODataset(Dataset):
+    """Small synthetic dataset for object detection testing."""
+    def __init__(self, size=1000, num_classes=91):
+        self.size = size
+        self.num_classes = num_classes
 
     def __len__(self):
-        return len(self.dataset)
+        return self.size
 
     def __getitem__(self, idx):
-        item = self.dataset[idx]
-        img = item["image"].convert("RGB")
-        img = F.to_tensor(img)
-
-        objects = item["objects"]
-        boxes = torch.tensor(objects["bbox"], dtype=torch.float32)
-        labels = torch.tensor(objects["category"], dtype=torch.int64)
-
-        if len(boxes) == 0:
-            boxes = torch.zeros((0, 4), dtype=torch.float32)
-            labels = torch.zeros((0,), dtype=torch.int64)
-
+        img = torch.rand(3, 224, 224)
+        num_boxes = torch.randint(1, 5, (1,)).item()
+        boxes = torch.rand(num_boxes, 4)
+        boxes[:, 2:] += boxes[:, :2]
+        boxes = torch.clamp(boxes, 0, 1) * 224
+        labels = torch.randint(1, self.num_classes, (num_boxes,))
         target = {"boxes": boxes, "labels": labels}
         return img, target
 
@@ -40,12 +37,9 @@ class VOCDataModule(L.LightningDataModule):
         self.num_workers = num_workers
 
     def setup(self, stage=None):
-        dataset = load_dataset("detection-datasets/coco", split="train[:5000]", trust_remote_code=True)
-        val_dataset = load_dataset("detection-datasets/coco", split="validation[:1000]", trust_remote_code=True)
-
         if stage == "fit" or stage is None:
-            self.train_dataset = COCODetectionDataset(dataset)
-            self.val_dataset = COCODetectionDataset(val_dataset)
+            self.train_dataset = FakeCOCODataset(size=1000)
+            self.val_dataset = FakeCOCODataset(size=200)
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,
