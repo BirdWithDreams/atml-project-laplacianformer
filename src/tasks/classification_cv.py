@@ -80,10 +80,14 @@ class CVClassificationTask(L.LightningModule):
         self._validate_targets(y)
         logits = self(x)
         loss = self.criterion(logits, y)
+        batch_size = x.shape[0]
         self.train_acc(logits, y)
+        acc_step = (torch.argmax(logits, dim=1) == y).float().mean()
 
-        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log("train/acc", self.train_acc, on_step=True, on_epoch=True)
+        self.log("train/loss_step", loss, on_step=True, on_epoch=False, prog_bar=True, batch_size=batch_size)
+        self.log("train/loss_epoch", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=batch_size)
+        self.log("train/acc_step", acc_step, on_step=True, on_epoch=False, batch_size=batch_size)
+        self.log("train/acc_epoch", self.train_acc, on_step=False, on_epoch=True)
 
         return loss
 
@@ -92,12 +96,13 @@ class CVClassificationTask(L.LightningModule):
         self._validate_targets(y)
         logits = self(x)
         loss = self.criterion(logits, y)
+        batch_size = x.shape[0]
         
         self.val_acc(logits, y)
         self.val_prec(logits, y)
         self.val_rec(logits, y)
 
-        self.log("val/loss", loss, prog_bar=True)
+        self.log("val/loss", loss, prog_bar=True, batch_size=batch_size)
         self.log("val/acc", self.val_acc, prog_bar=True)
         self.log("val/precision", self.val_prec)
         self.log("val/recall", self.val_rec)
@@ -107,7 +112,7 @@ class CVClassificationTask(L.LightningModule):
         self._validate_targets(y)
         logits = self(x)
         loss = self.criterion(logits, y)
-        self.log("test/loss", loss)
+        self.log("test/loss", loss, batch_size=x.shape[0])
 
     def configure_optimizers(self):
         if self.hparams.optimizer == "AdamW":
