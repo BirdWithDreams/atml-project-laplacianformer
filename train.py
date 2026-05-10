@@ -126,8 +126,9 @@ def main(cfg: DictConfig):
             optimizer=cfg.task.optimizer,
             model_cfg=model_cfg
         )
-    task = torch.compile(task)
-
+    if cfg.task.name != "detection":
+        task = torch.compile(task)
+        
     # 3. Setup Logger
     wandb_logger = WandbLogger(
         project=cfg.logger.project,
