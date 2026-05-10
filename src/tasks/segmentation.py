@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchmetrics import Metric
 
-from src.models.segmentation import PyramidSegmentationModel
+from src.models.segmentation import PyramidSegmentationModel, TorchvisionSegmentationModel
 
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
@@ -260,33 +260,45 @@ class SemanticSegmentationTask(L.LightningModule):
             model_cfg = {"attn_type": "laplacian", "backbone_type": "pvt"}
 
         backbone_type = model_cfg.get("backbone_type", "pvt")
-        if backbone_type != "pvt":
-            raise ValueError("SemanticSegmentationTask currently supports backbone_type='pvt'")
+        if backbone_type == "pvt":
+            self.model = PyramidSegmentationModel(
+                num_classes=num_classes,
+                img_size=model_cfg.get("img_size", 224),
+                embed_dims=tuple(model_cfg.get("embed_dims", [64, 128, 320, 512])),
+                depths=tuple(model_cfg.get("depths", [2, 2, 2, 2])),
+                num_heads=tuple(model_cfg.get("num_heads", [1, 2, 5, 8])),
+                mlp_ratios=tuple(model_cfg.get("mlp_ratios", [8.0, 8.0, 4.0, 4.0])),
+                patch_sizes=tuple(model_cfg.get("patch_sizes", [7, 3, 3, 3])),
+                strides=tuple(model_cfg.get("strides", [4, 2, 2, 2])),
+                paddings=tuple(model_cfg.get("paddings", [3, 1, 1, 1])),
+                pool_ratios=tuple(model_cfg.get("pool_ratios", [8, 4, 2, 1])),
+                attn_type=model_cfg.get("attn_type", "laplacian"),
+                lambda_scale=model_cfg.get("lambda_scale", 4.0),
+                ns_iters=model_cfg.get("ns_iters", 5),
+                use_rope=model_cfg.get("use_rope", True),
+                rope_base=model_cfg.get("rope_base", 10000.0),
+                laplacian_backend=model_cfg.get("laplacian_backend", "cuda"),
+                decoder_dim=model_cfg.get("decoder_dim", 128),
+                decoder_norm_groups=model_cfg.get("decoder_norm_groups", 32),
+                segmentation_head_dim=model_cfg.get("segmentation_head_dim", 64),
+                segmentation_head_layers=model_cfg.get("segmentation_head_layers", 2),
+                dropout=model_cfg.get("dropout", 0.1),
+            )
+        elif backbone_type == "torchvision":
+            self.model = TorchvisionSegmentationModel(
+                num_classes=num_classes,
+                architecture=model_cfg.get("architecture", "deeplabv3_resnet50"),
+                weights=model_cfg.get("weights", "DEFAULT"),
+                weights_backbone=model_cfg.get("weights_backbone", "DEFAULT"),
+                aux_loss=model_cfg.get("aux_loss", None),
+            )
+        else:
+            raise ValueError(
+                "SemanticSegmentationTask supports backbone_type='pvt' or 'torchvision', "
+                f"got {backbone_type!r}."
+            )
 
-        self.model = PyramidSegmentationModel(
-            num_classes=num_classes,
-            img_size=model_cfg.get("img_size", 224),
-            embed_dims=tuple(model_cfg.get("embed_dims", [64, 128, 320, 512])),
-            depths=tuple(model_cfg.get("depths", [2, 2, 2, 2])),
-            num_heads=tuple(model_cfg.get("num_heads", [1, 2, 5, 8])),
-            mlp_ratios=tuple(model_cfg.get("mlp_ratios", [8.0, 8.0, 4.0, 4.0])),
-            patch_sizes=tuple(model_cfg.get("patch_sizes", [7, 3, 3, 3])),
-            strides=tuple(model_cfg.get("strides", [4, 2, 2, 2])),
-            paddings=tuple(model_cfg.get("paddings", [3, 1, 1, 1])),
-            pool_ratios=tuple(model_cfg.get("pool_ratios", [8, 4, 2, 1])),
-            attn_type=model_cfg.get("attn_type", "laplacian"),
-            lambda_scale=model_cfg.get("lambda_scale", 4.0),
-            ns_iters=model_cfg.get("ns_iters", 5),
-            use_rope=model_cfg.get("use_rope", True),
-            rope_base=model_cfg.get("rope_base", 10000.0),
-            laplacian_backend=model_cfg.get("laplacian_backend", "cuda"),
-            decoder_dim=model_cfg.get("decoder_dim", 128),
-            decoder_norm_groups=model_cfg.get("decoder_norm_groups", 32),
-            segmentation_head_dim=model_cfg.get("segmentation_head_dim", 64),
-            segmentation_head_layers=model_cfg.get("segmentation_head_layers", 2),
-            dropout=model_cfg.get("dropout", 0.1),
-        )
-        if model_cfg.get("backbone_checkpoint_path", None):
+        if backbone_type == "pvt" and model_cfg.get("backbone_checkpoint_path", None):
             self._load_backbone_checkpoint(model_cfg["backbone_checkpoint_path"])
 
         self.criterion = FocalDiceLoss(
@@ -316,11 +328,13 @@ class SemanticSegmentationTask(L.LightningModule):
 
         for key, value in state_dict.items():
             stripped_key = key.removeprefix("module.")
+            matched_prefixed_key = False
             for prefix in ("model.backbone.", "backbone."):
                 if stripped_key.startswith(prefix):
                     candidate_state[stripped_key.removeprefix(prefix)] = value
+                    matched_prefixed_key = True
                     break
-            elif stripped_key in backbone_state:
+            if not matched_prefixed_key and stripped_key in backbone_state:
                 candidate_state[stripped_key] = value
 
         compatible_state = {

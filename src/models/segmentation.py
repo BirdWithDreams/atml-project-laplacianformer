@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision
 
 from src.models.pvt import PyramidVisionBackbone
 
@@ -148,3 +149,84 @@ class PyramidSegmentationModel(nn.Module):
 
         fused = self.fuse(torch.cat(projected, dim=1))
         return self.segmentation_head(fused, input_size)
+
+
+class TorchvisionSegmentationModel(nn.Module):
+    """Thin wrapper around torchvision segmentation models for pipeline sanity checks."""
+
+    def __init__(
+            self,
+            num_classes: int,
+            architecture: str = "deeplabv3_resnet50",
+            weights: str | None = "DEFAULT",
+            weights_backbone: str | None = "DEFAULT",
+            aux_loss: bool | None = None,
+            ):
+        super().__init__()
+        self.architecture = architecture
+        self.model = self._build_model(
+            architecture=architecture,
+            num_classes=num_classes,
+            weights=weights,
+            weights_backbone=weights_backbone,
+            aux_loss=aux_loss,
+        )
+        self.backbone = self.model.backbone
+        decoder_modules = [self.model.classifier]
+        aux_classifier = getattr(self.model, "aux_classifier", None)
+        if aux_classifier is not None:
+            decoder_modules.append(aux_classifier)
+        self.segmentation_head = nn.ModuleList(decoder_modules)
+        self.projections = nn.ModuleList()
+        self.fuse = nn.Identity()
+
+    @staticmethod
+    def _resolve_weights(weights_enum, value: str | None):
+        if value is None or str(value).lower() in {"none", "null", "false"}:
+            return None
+        if str(value).upper() == "DEFAULT":
+            return weights_enum.DEFAULT
+        return weights_enum[value]
+
+    def _build_model(
+            self,
+            architecture: str,
+            num_classes: int,
+            weights: str | None,
+            weights_backbone: str | None,
+            aux_loss: bool | None,
+            ) -> nn.Module:
+        if architecture == "deeplabv3_resnet50":
+            from torchvision.models import ResNet50_Weights
+            from torchvision.models.segmentation import DeepLabV3_ResNet50_Weights
+
+            resolved_weights = self._resolve_weights(DeepLabV3_ResNet50_Weights, weights)
+            resolved_backbone_weights = None
+            if resolved_weights is None:
+                resolved_backbone_weights = self._resolve_weights(ResNet50_Weights, weights_backbone)
+            return torchvision.models.segmentation.deeplabv3_resnet50(
+                weights=resolved_weights,
+                weights_backbone=resolved_backbone_weights,
+                num_classes=num_classes,
+                aux_loss=aux_loss,
+            )
+
+        if architecture == "fcn_resnet50":
+            from torchvision.models import ResNet50_Weights
+            from torchvision.models.segmentation import FCN_ResNet50_Weights
+
+            resolved_weights = self._resolve_weights(FCN_ResNet50_Weights, weights)
+            resolved_backbone_weights = None
+            if resolved_weights is None:
+                resolved_backbone_weights = self._resolve_weights(ResNet50_Weights, weights_backbone)
+            return torchvision.models.segmentation.fcn_resnet50(
+                weights=resolved_weights,
+                weights_backbone=resolved_backbone_weights,
+                num_classes=num_classes,
+                aux_loss=aux_loss,
+            )
+
+        raise ValueError(f"Unknown torchvision segmentation architecture: {architecture}")
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.model(x)["out"]
