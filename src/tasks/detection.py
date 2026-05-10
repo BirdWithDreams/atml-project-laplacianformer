@@ -11,7 +11,7 @@ class DetectionBackboneWrapper(nn.Module):
     def __init__(self, backbone):
         super().__init__()
         self.backbone = backbone
-        self.out_channels = backbone.dim
+        self.out_channels = backbone.patch_embed.proj.out_channels
 
     def forward(self, x):
         features = self.backbone.patch_embed(x)
