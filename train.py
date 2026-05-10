@@ -254,6 +254,11 @@ def main(cfg: DictConfig):
                 "log_segmentation_images_every_n_epochs",
                 1,
             ),
+            focal_gamma=cfg.task.get("focal_gamma", 2.0),
+            focal_alpha=cfg.task.get("focal_alpha", None),
+            focal_loss_weight=cfg.task.get("focal_loss_weight", 1.0),
+            dice_loss_weight=cfg.task.get("dice_loss_weight", 1.0),
+            dice_smooth=cfg.task.get("dice_smooth", 1e-5),
         )
     elif cfg.task.name == "generation_nlp":
         from src.tasks.generation_nlp import NLPGenerationTask
