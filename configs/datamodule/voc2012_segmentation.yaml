@@ -1,7 +1,7 @@
 name: "voc2012_segmentation"
 dataset_name: "voc2012"
 data_dir: "./data"
-batch_size: 32
+batch_size: 8
 num_workers: 4
 image_size: 320
 train_min_scale: 0.5

@@ -82,6 +82,152 @@ class SegmentationMetrics(Metric):
             "pred_background_fraction": pred_background_fraction,
             "target_background_fraction": target_background_fraction,
         }
+<<<<<<< HEAD
+
+
+class FocalDiceLoss(nn.Module):
+    def __init__(
+            self,
+            num_classes: int,
+            ignore_index: int = 255,
+            focal_gamma: float = 2.0,
+            focal_alpha: float | list[float] | tuple[float, ...] | None = None,
+            class_weights: list[float] | tuple[float, ...] | None = None,
+            focal_weight: float = 1.0,
+            dice_weight: float = 1.0,
+            dice_smooth: float = 1e-5,
+            dice_present_classes_only: bool = True,
+            ):
+        super().__init__()
+        self.num_classes = int(num_classes)
+        self.ignore_index = int(ignore_index)
+        self.focal_gamma = float(focal_gamma)
+        self.focal_alpha_scalar = (
+            float(focal_alpha) if isinstance(focal_alpha, (int, float)) else None
+        )
+        self.focal_weight = float(focal_weight)
+        self.dice_weight = float(dice_weight)
+        self.dice_smooth = float(dice_smooth)
+        self.dice_present_classes_only = bool(dice_present_classes_only)
+
+        class_alpha = None
+        if focal_alpha is not None and self.focal_alpha_scalar is None:
+            class_alpha = torch.as_tensor(list(focal_alpha), dtype=torch.float)
+            if class_alpha.numel() != self.num_classes:
+                raise ValueError(
+                    "focal_alpha must be a scalar or provide one weight per class; "
+                    f"got {class_alpha.numel()} weights for {self.num_classes} classes."
+                )
+        ce_weights = None
+        if class_weights is not None:
+            ce_weights = torch.as_tensor(list(class_weights), dtype=torch.float)
+            if ce_weights.numel() != self.num_classes:
+                raise ValueError(
+                    "class_weights must provide one weight per class; "
+                    f"got {ce_weights.numel()} weights for {self.num_classes} classes."
+                )
+        self.register_buffer("class_alpha", class_alpha, persistent=False)
+        self.register_buffer("ce_weights", ce_weights, persistent=False)
+
+    def forward(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        valid = target != self.ignore_index
+        if not valid.any():
+            return logits.sum() * 0.0
+
+        focal_loss = self._focal_loss(logits, target, valid)
+        dice_loss = self._dice_loss(logits, target, valid)
+        return self.focal_weight * focal_loss + self.dice_weight * dice_loss
+
+    def _focal_loss(
+            self,
+            logits: torch.Tensor,
+            target: torch.Tensor,
+            valid: torch.Tensor,
+            ) -> torch.Tensor:
+        ce_loss = F.cross_entropy(
+            logits,
+            target,
+            ignore_index=self.ignore_index,
+            weight=self.ce_weights.to(logits.device) if self.ce_weights is not None else None,
+            reduction="none",
+        )
+        pt = torch.exp(-ce_loss)
+        focal_loss = (1.0 - pt).pow(self.focal_gamma) * ce_loss
+
+        if self.class_alpha is not None:
+            safe_target = target.clamp(min=0, max=self.num_classes - 1)
+            focal_loss = focal_loss * self.class_alpha.to(logits.device)[safe_target]
+        elif self.focal_alpha_scalar is not None:
+            background_alpha = 1.0 - self.focal_alpha_scalar
+            alpha_t = torch.where(
+                target == 0,
+                target.new_full(target.shape, background_alpha, dtype=logits.dtype),
+                target.new_full(target.shape, self.focal_alpha_scalar, dtype=logits.dtype),
+            )
+            focal_loss = focal_loss * alpha_t
+
+        return focal_loss[valid].mean()
+
+    def _dice_loss(
+            self,
+            logits: torch.Tensor,
+            target: torch.Tensor,
+            valid: torch.Tensor,
+            ) -> torch.Tensor:
+        probs = torch.softmax(logits, dim=1)
+        valid_mask = valid.unsqueeze(1).to(dtype=probs.dtype)
+        safe_target = target.masked_fill(~valid, 0)
+        target_one_hot = F.one_hot(safe_target, num_classes=self.num_classes)
+        target_one_hot = target_one_hot.permute(0, 3, 1, 2).to(dtype=probs.dtype)
+
+        probs = probs * valid_mask
+        target_one_hot = target_one_hot * valid_mask
+
+        reduce_dims = (0, 2, 3)
+        intersection = (probs * target_one_hot).sum(dim=reduce_dims)
+        denominator = probs.sum(dim=reduce_dims) + target_one_hot.sum(dim=reduce_dims)
+        dice = (2.0 * intersection + self.dice_smooth) / (denominator + self.dice_smooth)
+        if self.dice_present_classes_only:
+            present_classes = target_one_hot.sum(dim=reduce_dims) > 0
+            if present_classes.any():
+                return 1.0 - dice[present_classes].mean()
+        return 1.0 - dice.mean()
+
+
+class WarmupPolyLR(torch.optim.lr_scheduler.LambdaLR):
+    def __init__(
+            self,
+            optimizer: torch.optim.Optimizer,
+            max_iters: int,
+            warmup_iters: int = 1500,
+            power: float = 0.9,
+            ):
+        max_iters = int(max_iters)
+        warmup_iters = int(warmup_iters)
+        power = float(power)
+        if max_iters <= 0:
+            raise ValueError(f"max_iters must be positive for WarmupPolyLR, got {max_iters}.")
+        if warmup_iters < 0:
+            raise ValueError(f"warmup_iters must be non-negative, got {warmup_iters}.")
+        if warmup_iters >= max_iters:
+            raise ValueError(
+                "warmup_iters must be smaller than max_iters for WarmupPolyLR; "
+                f"got warmup_iters={warmup_iters}, max_iters={max_iters}."
+            )
+
+        def lr_lambda(current_step: int) -> float:
+            current_step = min(max(int(current_step), 0), max_iters)
+            if warmup_iters > 0 and current_step < warmup_iters:
+                return float(current_step + 1) / float(warmup_iters)
+
+            decay_iters = max(max_iters - warmup_iters, 1)
+            decay_step = min(max(current_step - warmup_iters, 0), decay_iters)
+            decay_progress = float(decay_step) / float(decay_iters)
+            return max(1.0 - decay_progress, 0.0) ** power
+
+        super().__init__(optimizer, lr_lambda=lr_lambda)
+=======
+>>>>>>> bcf6408 (Update segmentation pipeline with improved scaling, layers, and loss)
 
 
 class FocalDiceLoss(nn.Module):
@@ -227,132 +373,6 @@ class WarmupPolyLR(torch.optim.lr_scheduler.LambdaLR):
         super().__init__(optimizer, lr_lambda=lr_lambda)
 
 
-class FocalDiceLoss(nn.Module):
-    def __init__(
-            self,
-            num_classes: int,
-            ignore_index: int = 255,
-            focal_gamma: float = 2.0,
-            focal_alpha: float | list[float] | tuple[float, ...] | None = None,
-            focal_weight: float = 1.0,
-            dice_weight: float = 1.0,
-            dice_smooth: float = 1e-5,
-            ):
-        super().__init__()
-        self.num_classes = int(num_classes)
-        self.ignore_index = int(ignore_index)
-        self.focal_gamma = float(focal_gamma)
-        self.focal_alpha_scalar = (
-            float(focal_alpha) if isinstance(focal_alpha, (int, float)) else None
-        )
-        self.focal_weight = float(focal_weight)
-        self.dice_weight = float(dice_weight)
-        self.dice_smooth = float(dice_smooth)
-
-        class_alpha = None
-        if focal_alpha is not None and self.focal_alpha_scalar is None:
-            class_alpha = torch.as_tensor(list(focal_alpha), dtype=torch.float)
-            if class_alpha.numel() != self.num_classes:
-                raise ValueError(
-                    "focal_alpha must be a scalar or provide one weight per class; "
-                    f"got {class_alpha.numel()} weights for {self.num_classes} classes."
-                )
-        self.register_buffer("class_alpha", class_alpha, persistent=False)
-
-    def forward(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        valid = target != self.ignore_index
-        if not valid.any():
-            return logits.sum() * 0.0
-
-        focal_loss = self._focal_loss(logits, target, valid)
-        dice_loss = self._dice_loss(logits, target, valid)
-        return self.focal_weight * focal_loss + self.dice_weight * dice_loss
-
-    def _focal_loss(
-            self,
-            logits: torch.Tensor,
-            target: torch.Tensor,
-            valid: torch.Tensor,
-            ) -> torch.Tensor:
-        ce_loss = F.cross_entropy(
-            logits,
-            target,
-            ignore_index=self.ignore_index,
-            reduction="none",
-        )
-        pt = torch.exp(-ce_loss)
-        focal_loss = (1.0 - pt).pow(self.focal_gamma) * ce_loss
-
-        if self.class_alpha is not None:
-            safe_target = target.clamp(min=0, max=self.num_classes - 1)
-            focal_loss = focal_loss * self.class_alpha.to(logits.device)[safe_target]
-        elif self.focal_alpha_scalar is not None:
-            background_alpha = 1.0 - self.focal_alpha_scalar
-            alpha_t = torch.where(
-                target == 0,
-                target.new_full(target.shape, background_alpha, dtype=logits.dtype),
-                target.new_full(target.shape, self.focal_alpha_scalar, dtype=logits.dtype),
-            )
-            focal_loss = focal_loss * alpha_t
-
-        return focal_loss[valid].mean()
-
-    def _dice_loss(
-            self,
-            logits: torch.Tensor,
-            target: torch.Tensor,
-            valid: torch.Tensor,
-            ) -> torch.Tensor:
-        probs = torch.softmax(logits, dim=1)
-        valid_mask = valid.unsqueeze(1).to(dtype=probs.dtype)
-        safe_target = target.masked_fill(~valid, 0)
-        target_one_hot = F.one_hot(safe_target, num_classes=self.num_classes)
-        target_one_hot = target_one_hot.permute(0, 3, 1, 2).to(dtype=probs.dtype)
-
-        probs = probs * valid_mask
-        target_one_hot = target_one_hot * valid_mask
-
-        reduce_dims = (0, 2, 3)
-        intersection = (probs * target_one_hot).sum(dim=reduce_dims)
-        denominator = probs.sum(dim=reduce_dims) + target_one_hot.sum(dim=reduce_dims)
-        dice = (2.0 * intersection + self.dice_smooth) / (denominator + self.dice_smooth)
-        return 1.0 - dice.mean()
-
-
-class WarmupPolyLR(torch.optim.lr_scheduler.LambdaLR):
-    def __init__(
-            self,
-            optimizer: torch.optim.Optimizer,
-            max_iters: int,
-            warmup_iters: int = 1500,
-            power: float = 0.9,
-            ):
-        max_iters = int(max_iters)
-        warmup_iters = int(warmup_iters)
-        power = float(power)
-        if max_iters <= 0:
-            raise ValueError(f"max_iters must be positive for WarmupPolyLR, got {max_iters}.")
-        if warmup_iters < 0:
-            raise ValueError(f"warmup_iters must be non-negative, got {warmup_iters}.")
-        if warmup_iters >= max_iters:
-            raise ValueError(
-                "warmup_iters must be smaller than max_iters for WarmupPolyLR; "
-                f"got warmup_iters={warmup_iters}, max_iters={max_iters}."
-            )
-
-        def lr_lambda(current_step: int) -> float:
-            current_step = min(max(int(current_step), 0), max_iters)
-            if warmup_iters > 0 and current_step < warmup_iters:
-                return float(current_step + 1) / float(warmup_iters)
-
-            decay_iters = max(max_iters - warmup_iters, 1)
-            decay_step = min(max(current_step - warmup_iters, 0), decay_iters)
-            decay_progress = float(decay_step) / float(decay_iters)
-            return max(1.0 - decay_progress, 0.0) ** power
-
-        super().__init__(optimizer, lr_lambda=lr_lambda)
-
-
 class SemanticSegmentationTask(L.LightningModule):
     def __init__(
             self,
@@ -373,9 +393,11 @@ class SemanticSegmentationTask(L.LightningModule):
             log_segmentation_images_every_n_epochs: int = 1,
             focal_gamma: float = 2.0,
             focal_alpha: float | list[float] | tuple[float, ...] | None = None,
+            class_weights: list[float] | tuple[float, ...] | None = None,
             focal_loss_weight: float = 1.0,
             dice_loss_weight: float = 1.0,
             dice_smooth: float = 1e-5,
+            dice_present_classes_only: bool = True,
             ):
         super().__init__()
         self.save_hyperparameters()
@@ -445,16 +467,22 @@ class SemanticSegmentationTask(L.LightningModule):
             decoder_dim=model_cfg.get("decoder_dim", 128),
             decoder_norm_groups=model_cfg.get("decoder_norm_groups", 32),
             segmentation_head_dim=model_cfg.get("segmentation_head_dim", 64),
+            segmentation_head_layers=model_cfg.get("segmentation_head_layers", 2),
             dropout=model_cfg.get("dropout", 0.1),
         )
+        if model_cfg.get("backbone_checkpoint_path", None):
+            self._load_backbone_checkpoint(model_cfg["backbone_checkpoint_path"])
+
         self.criterion = FocalDiceLoss(
             num_classes=num_classes,
             ignore_index=ignore_index,
             focal_gamma=focal_gamma,
             focal_alpha=focal_alpha,
+            class_weights=class_weights,
             focal_weight=focal_loss_weight,
             dice_weight=dice_loss_weight,
             dice_smooth=dice_smooth,
+            dice_present_classes_only=dice_present_classes_only,
         )
         self.val_metrics = SegmentationMetrics(num_classes=num_classes, ignore_index=ignore_index)
         self.test_metrics = SegmentationMetrics(num_classes=num_classes, ignore_index=ignore_index)
@@ -472,6 +500,7 @@ class SemanticSegmentationTask(L.LightningModule):
 
         for key, value in state_dict.items():
             stripped_key = key.removeprefix("module.")
+<<<<<<< HEAD
             matched_prefixed_key = False
             for prefix in ("model.backbone.", "backbone."):
                 if stripped_key.startswith(prefix):
@@ -479,6 +508,13 @@ class SemanticSegmentationTask(L.LightningModule):
                     matched_prefixed_key = True
                     break
             if not matched_prefixed_key and stripped_key in backbone_state:
+=======
+            for prefix in ("model.backbone.", "backbone."):
+                if stripped_key.startswith(prefix):
+                    candidate_state[stripped_key.removeprefix(prefix)] = value
+                    break
+            elif stripped_key in backbone_state:
+>>>>>>> bcf6408 (Update segmentation pipeline with improved scaling, layers, and loss)
                 candidate_state[stripped_key] = value
 
         compatible_state = {

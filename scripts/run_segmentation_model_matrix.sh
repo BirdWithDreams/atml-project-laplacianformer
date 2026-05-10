@@ -5,70 +5,31 @@ set -uo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
-DEFAULT_MODELS=(
-  laplacian_pvt_tiny_cuda
-  laplacian_pvt_small_cuda
-  vanilla_pvt_small
-  vanilla_pvt_tiny
-)
+usage() {
+  cat <<'EOF'
+Run staged semantic-segmentation baseline experiments.
 
 DEFAULT_OPTIMIZERS=(
   adamw_segmentation_poly
 )
 
-DEFAULT_DATASETS=(
-  stanford_background_segmentation
-)
+Environment overrides:
+  RUN_SET=smoke|baseline|full
+  TRAIN_CMD="uv run python"
+  ACCELERATOR=gpu DEVICES=1 PRECISION=32 COMPILE=false
+  WANDB_PROJECT=segmentation-baselines
+  ACCUMULATE_GRAD_BATCHES=4
+  MAX_STEPS=80000
+  BACKBONE_CHECKPOINT_PATH=/path/to/matching_pvt.ckpt
+  VANILLA_BACKBONE_CHECKPOINT_PATH=/path/to/vanilla_pvt.ckpt
+  LAPLACIAN_BACKBONE_CHECKPOINT_PATH=/path/to/laplacian_pvt.ckpt
+  EXTRA_OVERRIDES='logger.entity=null trainer.log_every_n_steps=20'
 
-ACCELERATOR="${ACCELERATOR:-gpu}"
-DEVICES="${DEVICES:-1}"
-PRECISION="${PRECISION:-32}"
-COMPILE="${COMPILE:-false}"
-ACCUMULATE_GRAD_BATCHES="${ACCUMULATE_GRAD_BATCHES:-4}"
-MAX_STEPS="${MAX_STEPS:-}"
-WANDB_PROJECT="${WANDB_PROJECT:-stanford-background-segmentation}"
-WANDB_ENTITY="${WANDB_ENTITY:-}"
-MODEL_IMG_SIZE="${MODEL_IMG_SIZE:-320}"
-DRY_RUN="${DRY_RUN:-false}"
-SEED="${SEED:-42}"
-
-AUTO_BACKBONE_CHECKPOINTS="${AUTO_BACKBONE_CHECKPOINTS:-false}"
-CV_BACKBONE_ROOT="${CV_BACKBONE_ROOT:-results/cv-model-matrix}"
-CV_BACKBONE_DATASET="${CV_BACKBONE_DATASET:-imagenet}"
-CV_BACKBONE_OPTIMIZER="${CV_BACKBONE_OPTIMIZER:-adamw_cv_default}"
-CV_BACKBONE_CHECKPOINT_FILENAME="${CV_BACKBONE_CHECKPOINT_FILENAME:-last.ckpt}"
-LAPLACIAN_CV_LAMBDA="${LAPLACIAN_CV_LAMBDA:-4}"
-LAPLACIAN_CV_POOL="${LAPLACIAN_CV_POOL:-2}"
-REQUIRE_PRETRAINED_BACKBONE="${REQUIRE_PRETRAINED_BACKBONE:-false}"
-
-SKIP_FIRST_N=0
-EXTRA_ARGS=()
-
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --skip)
-      if [ "$#" -lt 2 ]; then
-        echo "--skip requires a non-negative integer argument"
-        exit 1
-      fi
-      SKIP_FIRST_N="$2"
-      shift 2
-      ;;
-    --skip=*)
-      SKIP_FIRST_N="${1#--skip=}"
-      shift
-      ;;
-    *)
-      EXTRA_ARGS+=("$1")
-      shift
-      ;;
-  esac
-done
-
-if ! [[ "${SKIP_FIRST_N}" =~ ^[0-9]+$ ]]; then
-  echo "--skip must be a non-negative integer, got: ${SKIP_FIRST_N}"
-  exit 1
-fi
+Script flags:
+  --skip N      Skip the first N planned experiments
+  --limit N     Run at most N experiments after skipping
+  --dry-run     Print commands without executing
+  --help        Show this message
 
 if [ -n "${MODELS:-}" ]; then
   read -r -a MODEL_LIST <<< "${MODELS}"
@@ -76,17 +37,34 @@ else
   MODEL_LIST=("${DEFAULT_MODELS[@]}")
 fi
 
-if [ -n "${OPTIMIZERS:-}" ]; then
-  read -r -a OPTIMIZER_LIST <<< "${OPTIMIZERS}"
-else
-  OPTIMIZER_LIST=("${DEFAULT_OPTIMIZERS[@]}")
-fi
-
-if [ -n "${DATASETS:-}" ]; then
-  read -r -a DATASET_LIST <<< "${DATASETS}"
-else
-  DATASET_LIST=("${DEFAULT_DATASETS[@]}")
-fi
+SKIP=0
+LIMIT=0
+DRY_RUN=false
+HYDRA_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --skip)
+      SKIP="$2"
+      shift 2
+      ;;
+    --limit)
+      LIMIT="$2"
+      shift 2
+      ;;
+    --dry-run)
+      DRY_RUN=true
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      HYDRA_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
 
 if [ -n "${TRAIN_CMD:-}" ]; then
   read -r -a TRAIN_CMD_LIST <<< "${TRAIN_CMD}"
@@ -96,39 +74,77 @@ else
   TRAIN_CMD_LIST=(python)
 fi
 
-TRAINER_ARGS=(
+RUN_SET="${RUN_SET:-baseline}"
+ACCELERATOR="${ACCELERATOR:-gpu}"
+DEVICES="${DEVICES:-1}"
+PRECISION="${PRECISION:-32}"
+COMPILE="${COMPILE:-false}"
+WANDB_PROJECT="${WANDB_PROJECT:-segmentation-baselines}"
+ACCUMULATE_GRAD_BATCHES="${ACCUMULATE_GRAD_BATCHES:-4}"
+MAX_STEPS="${MAX_STEPS:-}"
+
+COMMON_OVERRIDES=(
+  task=semantic_segmentation
+  optimizer=adamw_segmentation_poly
   trainer.accelerator="${ACCELERATOR}"
   trainer.devices="${DEVICES}"
   trainer.precision="${PRECISION}"
   trainer.compile="${COMPILE}"
+  trainer.accumulate_grad_batches="${ACCUMULATE_GRAD_BATCHES}"
+  logger.project="${WANDB_PROJECT}"
 )
 
-if [ -n "${ACCUMULATE_GRAD_BATCHES}" ]; then
-  TRAINER_ARGS+=(trainer.accumulate_grad_batches="${ACCUMULATE_GRAD_BATCHES}")
-fi
 if [ -n "${MAX_STEPS}" ]; then
-  TRAINER_ARGS+=(trainer.max_steps="${MAX_STEPS}")
-  TRAINER_ARGS+=(optimizer.max_iters="${MAX_STEPS}")
+  COMMON_OVERRIDES+=(trainer.max_steps="${MAX_STEPS}" optimizer.max_iters="${MAX_STEPS}")
 fi
 
-DATAMODULE_ARGS=()
-if [ -n "${BATCH_SIZE:-}" ]; then
-  DATAMODULE_ARGS+=(datamodule.batch_size="${BATCH_SIZE}")
-fi
-if [ -n "${NUM_WORKERS:-}" ]; then
-  DATAMODULE_ARGS+=(datamodule.num_workers="${NUM_WORKERS}")
-fi
-if [ -n "${MAX_TRAIN_SAMPLES:-}" ]; then
-  DATAMODULE_ARGS+=(datamodule.max_train_samples="${MAX_TRAIN_SAMPLES}")
-fi
-if [ -n "${MAX_VAL_SAMPLES:-}" ]; then
-  DATAMODULE_ARGS+=(datamodule.max_val_samples="${MAX_VAL_SAMPLES}")
-fi
-if [ -n "${MAX_TEST_SAMPLES:-}" ]; then
-  DATAMODULE_ARGS+=(datamodule.max_test_samples="${MAX_TEST_SAMPLES}")
+if [ -n "${EXTRA_OVERRIDES:-}" ]; then
+  read -r -a EXTRA_OVERRIDE_LIST <<< "${EXTRA_OVERRIDES}"
+  COMMON_OVERRIDES+=("${EXTRA_OVERRIDE_LIST[@]}")
 fi
 
-manual_checkpoint_for_model() {
+EXPERIMENTS=()
+add_experiment() {
+  local name="$1"
+  local dataset="$2"
+  local model="$3"
+  EXPERIMENTS+=("${name}|${dataset}|${model}")
+}
+
+case "${RUN_SET}" in
+  smoke)
+    add_experiment "voc_torchvision_deeplabv3_pretrained_smoke" "voc2012_segmentation" "torchvision_deeplabv3_resnet50"
+    add_experiment "voc_vanilla_small_smoke" "voc2012_segmentation" "vanilla_pvt_small"
+    add_experiment "voc_laplacian_small_smoke" "voc2012_segmentation" "laplacian_pvt_small_cuda"
+    ;;
+  baseline)
+    add_experiment "voc_torchvision_deeplabv3_pretrained_sanity" "voc2012_segmentation" "torchvision_deeplabv3_resnet50"
+    add_experiment "voc_vanilla_small_baseline" "voc2012_segmentation" "vanilla_pvt_small"
+    add_experiment "voc_laplacian_small_baseline" "voc2012_segmentation" "laplacian_pvt_small_cuda"
+    add_experiment "voc_vanilla_medium_capacity" "voc2012_segmentation" "vanilla_pvt_medium"
+    add_experiment "voc_laplacian_medium_capacity" "voc2012_segmentation" "laplacian_pvt_medium_cuda"
+    add_experiment "cityscapes_vanilla_small_baseline" "cityscapes_segmentation" "vanilla_pvt_small"
+    add_experiment "cityscapes_laplacian_small_baseline" "cityscapes_segmentation" "laplacian_pvt_small_cuda"
+    ;;
+  full)
+    add_experiment "voc_torchvision_deeplabv3_pretrained_sanity" "voc2012_segmentation" "torchvision_deeplabv3_resnet50"
+    add_experiment "voc_torchvision_fcn_pretrained_sanity" "voc2012_segmentation" "torchvision_fcn_resnet50"
+    add_experiment "voc_vanilla_small_baseline" "voc2012_segmentation" "vanilla_pvt_small"
+    add_experiment "voc_laplacian_small_baseline" "voc2012_segmentation" "laplacian_pvt_small_cuda"
+    add_experiment "voc_vanilla_medium_capacity" "voc2012_segmentation" "vanilla_pvt_medium"
+    add_experiment "voc_laplacian_medium_capacity" "voc2012_segmentation" "laplacian_pvt_medium_cuda"
+    add_experiment "cityscapes_vanilla_small_baseline" "cityscapes_segmentation" "vanilla_pvt_small"
+    add_experiment "cityscapes_laplacian_small_baseline" "cityscapes_segmentation" "laplacian_pvt_small_cuda"
+    add_experiment "cityscapes_vanilla_medium_capacity" "cityscapes_segmentation" "vanilla_pvt_medium"
+    add_experiment "cityscapes_laplacian_medium_capacity" "cityscapes_segmentation" "laplacian_pvt_medium_cuda"
+    ;;
+  *)
+    echo "Unknown RUN_SET='${RUN_SET}'. Expected smoke, baseline, or full." >&2
+    exit 2
+    ;;
+esac
+
+checkpoint_override_for_model() {
   local model="$1"
   local checkpoint=""
 
@@ -339,12 +355,4 @@ for dataset in "${DATASET_LIST[@]}"; do
   done
 done
 
-if [ "${#FAILED_RUNS[@]}" -gt 0 ]; then
-  echo
-  echo "Completed with failures:"
-  printf '  - %s\n' "${FAILED_RUNS[@]}"
-  exit 1
-fi
-
-echo
-echo "All segmentation runs completed."
+echo "Completed ${ran} experiment(s) from RUN_SET=${RUN_SET}."

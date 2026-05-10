@@ -22,13 +22,24 @@ class SegmentationHead(nn.Module):
             num_classes: int,
             hidden_channels: int = 64,
             norm_groups: int = 32,
+            num_layers: int = 2,
+            dropout: float = 0.0,
             ):
         super().__init__()
-        self.refine = nn.Sequential(
-            nn.Conv2d(in_channels, hidden_channels, kernel_size=3, padding=1, bias=False),
-            _make_group_norm(hidden_channels, norm_groups),
-            nn.ReLU(inplace=True),
-        )
+        layers = []
+        current_channels = in_channels
+        for _ in range(max(int(num_layers), 1)):
+            layers.extend(
+                [
+                    nn.Conv2d(current_channels, hidden_channels, kernel_size=3, padding=1, bias=False),
+                    _make_group_norm(hidden_channels, norm_groups),
+                    nn.GELU(),
+                ]
+            )
+            if dropout > 0:
+                layers.append(nn.Dropout2d(dropout))
+            current_channels = hidden_channels
+        self.refine = nn.Sequential(*layers)
         self.classifier = nn.Conv2d(hidden_channels, num_classes, kernel_size=1)
 
     def forward(self, features: torch.Tensor, output_size: tuple[int, int]) -> torch.Tensor:
@@ -70,6 +81,7 @@ class PyramidSegmentationModel(nn.Module):
             decoder_dim: int = 128,
             decoder_norm_groups: int = 32,
             segmentation_head_dim: int = 64,
+            segmentation_head_layers: int = 2,
             dropout: float = 0.1,
             ):
         super().__init__()
@@ -114,6 +126,8 @@ class PyramidSegmentationModel(nn.Module):
             num_classes=num_classes,
             hidden_channels=segmentation_head_dim,
             norm_groups=decoder_norm_groups,
+            num_layers=segmentation_head_layers,
+            dropout=dropout * 0.5,
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

@@ -6,13 +6,17 @@ defaults:
 
 task:
   name: "semantic_segmentation"
-  focal_gamma: 2.0
-  focal_alpha: null
+  # gamma=0 makes this a class-balanced CE term; Dice is restricted to
+  # classes present in the batch to avoid punishing absent rare classes.
+  focal_gamma: 0.0
+  focal_alpha: 0.75
+  class_weights: null
   focal_loss_weight: 1.0
-  dice_loss_weight: 1.0
+  dice_loss_weight: 0.5
   dice_smooth: 0.00001
+  dice_present_classes_only: true
 
 trainer:
   max_epochs: -1
   max_steps: ${datamodule.segmentation_max_iters}
-  accumulate_grad_batches: 2
+  accumulate_grad_batches: 4
