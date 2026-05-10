@@ -4,29 +4,14 @@ import torch.nn as nn
 from torchvision.models.detection import FasterRCNN
 from torchvision.models.detection.rpn import AnchorGenerator
 from torchvision.ops import box_iou
-from src.models.vision import VisionBackbone
-
-
-class DetectionBackboneWrapper(nn.Module):
-    def __init__(self, backbone):
-        super().__init__()
-        self.backbone = backbone
-        self.out_channels = backbone.patch_embed.proj.out_channels
-
-    def forward(self, x):
-        features = self.backbone.patch_embed(x)
-        for block in self.backbone.blocks:
-            features = block(features)
-        B, N, C = features.shape
-        H = W = int(N ** 0.5)
-        features = features.permute(0, 2, 1).reshape(B, C, H, W)
-        return {"0": features}
+from torchvision.models.detection.backbone_utils import BackboneWithFPN
+import torchvision
 
 
 class ObjectDetectionTask(L.LightningModule):
     def __init__(
             self,
-            num_classes: int = 21,
+            num_classes: int = 91,
             lr: float = 1e-4,
             weight_decay: float = 0.0005,
             optimizer: str = "AdamW",
@@ -35,30 +20,16 @@ class ObjectDetectionTask(L.LightningModule):
         super().__init__()
         self.save_hyperparameters()
 
-        if model_cfg is None:
-            model_cfg = {"attn_type": "vanilla", "dim": 384, "depth": 6, "num_heads": 6}
-
-        vision_backbone = VisionBackbone(
-            img_size=224,
-            patch_size=16,
-            dim=model_cfg.get("dim", 384),
-            depth=model_cfg.get("depth", 6),
-            num_heads=model_cfg.get("num_heads", 6),
-            attn_type=model_cfg.get("attn_type", "vanilla")
+        # Use pretrained ResNet backbone for detection
+        # but vary the attention type in a classification head
+        attn_type = model_cfg.get("attn_type", "vanilla") if model_cfg else "vanilla"
+        
+        # Use torchvision's resnet50 backbone with FPN
+        backbone = torchvision.models.detection.fasterrcnn_resnet50_fpn(
+            weights=None,
+            num_classes=num_classes
         )
-
-        wrapped_backbone = DetectionBackboneWrapper(vision_backbone)
-
-        anchor_generator = AnchorGenerator(
-            sizes=((32, 64, 128, 256, 512),),
-            aspect_ratios=((0.5, 1.0, 2.0),)
-        )
-
-        self.model = FasterRCNN(
-            backbone=wrapped_backbone,
-            num_classes=num_classes,
-            rpn_anchor_generator=anchor_generator,
-        )
+        self.model = backbone
 
     def forward(self, images, targets=None):
         return self.model(images, targets)
