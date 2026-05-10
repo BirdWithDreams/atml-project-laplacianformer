@@ -1,16 +1,16 @@
 # LaplacianFormer CUDA Backend On GB10
 
-This project has two Laplacian attention backends:
+This project uses CUDA-only Laplacian attention in the task configs:
 
-- `laplacian_backend: "torch"`: the existing pure PyTorch implementation.
-- `laplacian_backend: "cuda"`: a fast path that calls the authors' custom CUDA kernels from `libs/laplacianformer`.
+- `laplacian_backend: "cuda"` for image PVT models, backed by `libs/laplacianformer`.
+- `laplacian_backend: "cuda_1d"` for text models, backed by `libs/laplacianformer_1d`.
 
 The CUDA backend is wired for the image PVT configs. The ready-to-run configs are:
 
 - `model=laplacian_pvt_small_cuda`
 - `model=laplacian_pvt_medium_cuda`
 
-These configs set `laplacian_fallback_to_torch: false`, so a missing extension, unsupported dtype, or unsupported GPU target fails loudly instead of silently falling back.
+Missing extensions, unsupported dtypes, CPU tensors, or unsupported GPU targets fail loudly instead of silently falling back to torch.
 
 ## 1. Verify The Server
 
@@ -157,7 +157,6 @@ from src.models.pvt import PyramidVisionBackbone
 model = PyramidVisionBackbone(
     attn_type="laplacian",
     laplacian_backend="cuda",
-    laplacian_fallback_to_torch=False,
 ).cuda().eval()
 
 x = torch.randn(1, 3, 224, 224, device="cuda")
