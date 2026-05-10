@@ -18,4 +18,6 @@ use_rope: true
 rope_base: 10000.0
 
 decoder_dim: 128
+decoder_norm_groups: 32
+segmentation_head_dim: 64
 dropout: 0.1

@@ -6,6 +6,11 @@ defaults:
 
 task:
   name: "semantic_segmentation"
+  focal_gamma: 2.0
+  focal_alpha: null
+  focal_loss_weight: 1.0
+  dice_loss_weight: 1.0
+  dice_smooth: 0.00001
 
 trainer:
   accumulate_grad_batches: 2
