@@ -1,0 +1,10 @@
+name: "torchvision_deeplabv3_resnet50"
+backbone_type: "torchvision"
+architecture: "deeplabv3_resnet50"
+img_size: 320
+
+# DEFAULT uses torchvision's pretrained DeepLabV3-ResNet50 segmentation weights.
+# This is intended as a data/pipeline sanity baseline, especially for VOC.
+weights: "DEFAULT"
+weights_backbone: null
+aux_loss: null
