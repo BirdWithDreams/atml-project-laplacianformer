@@ -111,14 +111,17 @@ class SemanticSegmentationTask(L.LightningModule):
         images, masks = batch
         logits = self(images)
         loss = self.criterion(logits, masks)
+        batch_size = images.shape[0]
 
         with torch.no_grad():
             preds = torch.argmax(logits, dim=1)
             valid = masks != self.hparams.ignore_index
             pixel_acc = (preds[valid] == masks[valid]).float().mean() if valid.any() else torch.tensor(0.0)
 
-        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log("train/pixel_acc", pixel_acc, on_step=False, on_epoch=True)
+        self.log("train/loss_step", loss, on_step=True, on_epoch=False, prog_bar=True, batch_size=batch_size)
+        self.log("train/loss_epoch", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=batch_size)
+        self.log("train/pixel_acc_step", pixel_acc, on_step=True, on_epoch=False, batch_size=batch_size)
+        self.log("train/pixel_acc_epoch", pixel_acc, on_step=False, on_epoch=True, batch_size=batch_size)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -126,10 +129,11 @@ class SemanticSegmentationTask(L.LightningModule):
         logits = self(images)
         loss = self.criterion(logits, masks)
         preds = torch.argmax(logits, dim=1)
+        batch_size = images.shape[0]
 
         self.val_metrics(preds, masks)
         self._maybe_log_segmentation_images("val", images, masks, preds, batch_idx)
-        self.log("val/loss", loss, prog_bar=True)
+        self.log("val/loss", loss, prog_bar=True, batch_size=batch_size)
 
     def on_validation_epoch_start(self):
         self._segmentation_log_counts["val"] = 0
@@ -145,10 +149,11 @@ class SemanticSegmentationTask(L.LightningModule):
         logits = self(images)
         loss = self.criterion(logits, masks)
         preds = torch.argmax(logits, dim=1)
+        batch_size = images.shape[0]
 
         self.test_metrics(preds, masks)
         self._maybe_log_segmentation_images("test", images, masks, preds, batch_idx)
-        self.log("test/loss", loss)
+        self.log("test/loss", loss, batch_size=batch_size)
 
     def on_test_epoch_start(self):
         self._segmentation_log_counts["test"] = 0
@@ -236,7 +241,7 @@ class SemanticSegmentationTask(L.LightningModule):
 
         experiment.log(
             {f"{split}/segmentation_masks": wandb_images},
-            step=int(self.global_step),
+            commit=False,
         )
         self._segmentation_log_counts[split] = already_logged + num_images
 

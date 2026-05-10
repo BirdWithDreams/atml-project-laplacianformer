@@ -134,8 +134,10 @@ class NERTask(L.LightningModule):
         logits = self(input_ids, attention_mask)
         # Flatten for CrossEntropyLoss
         loss = self.criterion(logits.reshape(-1, self.hparams.num_classes), labels.reshape(-1))
+        batch_size = input_ids.shape[0]
 
-        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train/loss_step", loss, on_step=True, on_epoch=False, prog_bar=True, batch_size=batch_size)
+        self.log("train/loss_epoch", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=batch_size)
 
         return loss
 
@@ -146,11 +148,12 @@ class NERTask(L.LightningModule):
 
         logits = self(input_ids, attention_mask)
         loss = self.criterion(logits.reshape(-1, self.hparams.num_classes), labels.reshape(-1))
+        batch_size = input_ids.shape[0]
         
         preds = torch.argmax(logits, dim=-1)
         self.val_metric(preds, labels)
 
-        self.log("val/loss", loss, prog_bar=True)
+        self.log("val/loss", loss, prog_bar=True, batch_size=batch_size)
 
     def on_validation_epoch_end(self):
         metrics = self.val_metric.compute()
@@ -165,11 +168,12 @@ class NERTask(L.LightningModule):
 
         logits = self(input_ids, attention_mask)
         loss = self.criterion(logits.reshape(-1, self.hparams.num_classes), labels.reshape(-1))
+        batch_size = input_ids.shape[0]
         
         preds = torch.argmax(logits, dim=-1)
         self.test_metric(preds, labels)
         
-        self.log("test/loss", loss)
+        self.log("test/loss", loss, batch_size=batch_size)
 
     def on_test_epoch_end(self):
         metrics = self.test_metric.compute()
