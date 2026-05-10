@@ -2,7 +2,6 @@ name: "laplacian_pvt_medium_cuda"
 backbone_type: "pvt"
 attn_type: "laplacian"
 laplacian_backend: "cuda"
-laplacian_fallback_to_torch: false
 img_size: 224
 
 embed_dims: [80, 160, 400, 640]

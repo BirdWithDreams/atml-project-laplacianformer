@@ -1,8 +1,8 @@
 name: "coco_segmentation"
 dataset_name: "coco"
 data_dir: "./data"
-batch_size: 64
-num_workers: 4
+batch_size: 32
+num_workers: 16
 image_size: 224
 num_classes: 81
 ignore_index: 255
@@ -16,7 +16,7 @@ coco_year: "2017"
 # ./data/coco/annotations/instances_val2017.json
 
 # Trains on a deterministic random subset when set to a positive integer.
-max_train_samples: 30000
+max_train_samples: null
 max_val_samples: null
 max_test_samples: null
 subset_seed: 42

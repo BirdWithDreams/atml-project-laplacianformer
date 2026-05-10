@@ -38,8 +38,7 @@ class CVClassificationTask(L.LightningModule):
             ns_iters=model_cfg.get("ns_iters", 5),
             use_rope=model_cfg.get("use_rope", True),
             rope_base=model_cfg.get("rope_base", 10000.0),
-            laplacian_backend=model_cfg.get("laplacian_backend", "torch"),
-            laplacian_fallback_to_torch=model_cfg.get("laplacian_fallback_to_torch", True),
+            laplacian_backend=model_cfg.get("laplacian_backend", "cuda"),
         )
         dim = self.backbone.out_dim
 

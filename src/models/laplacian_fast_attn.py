@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from .laplacian_attn import LaplacianLinearAttention, NewtonSchulzInverse
+from .laplacian_attn import LaplacianLinearAttention
 from .laplacian_cuda_ops import (
     can_use_laplacian_cuda,
     extension_diagnostics,
@@ -11,26 +11,19 @@ from .laplacian_cuda_ops import (
 
 
 class FastCudaNewtonSchulzInverse(nn.Module):
-    """Newton inverse layer backed by the authors' CUDA kernel when possible."""
+    """Newton inverse layer backed by the authors' CUDA kernel."""
 
     def __init__(
             self,
             num_iters: int = 5,
-            eps: float = 1e-4,
-            fallback_to_torch: bool = True,
             ):
         super().__init__()
         self.num_iters = num_iters
-        self.fallback_to_torch = fallback_to_torch
-        self.torch_solver = NewtonSchulzInverse(num_iters=num_iters, eps=eps)
 
     def forward(self, W: torch.Tensor) -> torch.Tensor:
         matrix_size = W.shape[-1]
         if can_use_laplacian_cuda(W, matrix_size=matrix_size):
             return newton_inverse_cuda(W.contiguous(), self.num_iters)
-
-        if self.fallback_to_torch:
-            return self.torch_solver(W)
 
         raise RuntimeError(
             "Fast CUDA Newton inverse is unavailable for this input. "
@@ -40,11 +33,10 @@ class FastCudaNewtonSchulzInverse(nn.Module):
 
 
 class FastCudaLaplacianLinearAttention(LaplacianLinearAttention):
-    """2D Laplacian attention that uses the authors' CUDA kernels as a fast path.
+    """2D Laplacian attention that requires the authors' CUDA kernels.
 
     This class intentionally lives beside the pure PyTorch implementation. It
-    keeps the same public forward interface as `LaplacianLinearAttention`, so
-    vision backbones can switch with a config flag.
+    keeps the same public forward interface as `LaplacianLinearAttention`.
     """
 
     def __init__(
@@ -56,7 +48,6 @@ class FastCudaLaplacianLinearAttention(LaplacianLinearAttention):
             ns_iters: int = 5,
             use_rope: bool = False,
             rope_base: float = 10000.0,
-            fallback_to_torch: bool = True,
             ):
         super().__init__(
             dim=dim,
@@ -67,18 +58,13 @@ class FastCudaLaplacianLinearAttention(LaplacianLinearAttention):
             use_rope=use_rope,
             rope_base=rope_base,
         )
-        self.fallback_to_torch = fallback_to_torch
         self.inverse_solver = FastCudaNewtonSchulzInverse(
             num_iters=ns_iters,
-            fallback_to_torch=fallback_to_torch,
         )
 
     def laplacian_kernel(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         if can_use_laplacian_cuda(x):
             return laplacian_kernel_cuda(x, y, self.lambda_scale)
-
-        if self.fallback_to_torch:
-            return super().laplacian_kernel(x, y)
 
         raise RuntimeError(
             "Fast CUDA Laplacian kernel is unavailable for this input. "

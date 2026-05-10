@@ -93,8 +93,7 @@ class _LaplaceSubtractionFunction(torch.autograd.Function):
         if query.dtype not in _SUPPORTED_LAPLACE_DTYPES:
             raise RuntimeError(
                 "LaplaceSubtraction CUDA path supports float16, float32, and float64. "
-                f"Got {query.dtype}; use trainer.precision=16-mixed or 32-true, "
-                "or allow the PyTorch fallback."
+                f"Got {query.dtype}; use trainer.precision=16-mixed or 32-true."
             )
         if query.shape[:2] != key.shape[:2] or query.shape[-1] != key.shape[-1]:
             raise ValueError(

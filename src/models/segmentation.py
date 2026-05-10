@@ -30,8 +30,7 @@ class PyramidSegmentationModel(nn.Module):
             ns_iters: int = 5,
             use_rope: bool = True,
             rope_base: float = 10000.0,
-            laplacian_backend: str = "torch",
-            laplacian_fallback_to_torch: bool = True,
+            laplacian_backend: str = "cuda",
             decoder_dim: int = 128,
             dropout: float = 0.1,
             ):
@@ -53,7 +52,6 @@ class PyramidSegmentationModel(nn.Module):
             use_rope=use_rope,
             rope_base=rope_base,
             laplacian_backend=laplacian_backend,
-            laplacian_fallback_to_torch=laplacian_fallback_to_torch,
         )
         self.projections = nn.ModuleList(
             [nn.Conv2d(dim, decoder_dim, kernel_size=1) for dim in embed_dims]
