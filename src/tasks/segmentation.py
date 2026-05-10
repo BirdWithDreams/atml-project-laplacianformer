@@ -303,14 +303,23 @@ class SemanticSegmentationTask(L.LightningModule):
 
         self.criterion = FocalDiceLoss(
             num_classes=num_classes,
-            ignore_index=ignore_index,
-            focal_gamma=focal_gamma,
-            focal_alpha=focal_alpha,
-            class_weights=class_weights,
-            focal_weight=focal_loss_weight,
-            dice_weight=dice_loss_weight,
-            dice_smooth=dice_smooth,
-            dice_present_classes_only=dice_present_classes_only,
+            img_size=model_cfg.get("img_size", 224),
+            embed_dims=tuple(model_cfg.get("embed_dims", [64, 128, 320, 512])),
+            depths=tuple(model_cfg.get("depths", [2, 2, 2, 2])),
+            num_heads=tuple(model_cfg.get("num_heads", [1, 2, 5, 8])),
+            mlp_ratios=tuple(model_cfg.get("mlp_ratios", [8.0, 8.0, 4.0, 4.0])),
+            patch_sizes=tuple(model_cfg.get("patch_sizes", [7, 3, 3, 3])),
+            strides=tuple(model_cfg.get("strides", [4, 2, 2, 2])),
+            paddings=tuple(model_cfg.get("paddings", [3, 1, 1, 1])),
+            pool_ratios=tuple(model_cfg.get("pool_ratios", [8, 4, 2, 1])),
+            attn_type=model_cfg.get("attn_type", "laplacian"),
+            lambda_scale=model_cfg.get("lambda_scale", 4.0),
+            ns_iters=model_cfg.get("ns_iters", 5),
+            use_rope=model_cfg.get("use_rope", True),
+            rope_base=model_cfg.get("rope_base", 10000.0),
+            laplacian_backend=model_cfg.get("laplacian_backend", "cuda"),
+            decoder_dim=model_cfg.get("decoder_dim", 128),
+            dropout=model_cfg.get("dropout", 0.1),
         )
         self.val_metrics = SegmentationMetrics(num_classes=num_classes, ignore_index=ignore_index)
         self.test_metrics = SegmentationMetrics(num_classes=num_classes, ignore_index=ignore_index)

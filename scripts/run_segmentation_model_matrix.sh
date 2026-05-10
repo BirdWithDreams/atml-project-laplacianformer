@@ -5,27 +5,47 @@ set -uo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
-DEFAULT_MODELS=(
-  laplacian_pvt_tiny_cuda
-  laplacian_pvt_small_cuda
-  vanilla_pvt_small
-  vanilla_pvt_tiny
-)
+
+usage() {
+  cat <<'EOF'
+Run staged semantic-segmentation baseline experiments.
 
 DEFAULT_OPTIMIZERS=(
   adamw_segmentation_poly
 )
 
-DEFAULT_DATASETS=(
-  stanford_background_segmentation
-)
+Environment overrides:
+  RUN_SET=smoke|baseline|full
+  TRAIN_CMD="uv run python"
+  ACCELERATOR=gpu DEVICES=1 PRECISION=32 COMPILE=false
+  WANDB_PROJECT=segmentation-baselines
+  ACCUMULATE_GRAD_BATCHES=4
+  MAX_STEPS=80000
+  BACKBONE_CHECKPOINT_PATH=/path/to/matching_pvt.ckpt
+  VANILLA_BACKBONE_CHECKPOINT_PATH=/path/to/vanilla_pvt.ckpt
+  LAPLACIAN_BACKBONE_CHECKPOINT_PATH=/path/to/laplacian_pvt.ckpt
+  EXTRA_OVERRIDES='logger.entity=null trainer.log_every_n_steps=20'
+
+to_csv() {
+  local value="$1"
+  value="${value//,/ }"
+  read -r -a items <<< "${value}"
+  local IFS=,
+  echo "${items[*]}"
+}
+
+MODELS="$(to_csv "${MODELS:-laplacian_pvt_medium_cuda laplacian_pvt_small_cuda vanilla_pvt_small vanilla_pvt_medium}")"
+OPTIMIZERS="$(to_csv "${OPTIMIZERS:-adamw_cv_default}")"
+DATASETS="$(to_csv "${DATASETS:-coco_segmentation voc2012_segmentation}")"
+
 
 ACCELERATOR="${ACCELERATOR:-gpu}"
 DEVICES="${DEVICES:-1}"
-PRECISION="${PRECISION:-32}"
+PRECISION="${PRECISION:-16}"
 COMPILE="${COMPILE:-false}"
 WANDB_PROJECT="${WANDB_PROJECT:-segmentation-model-matrix}"
 ACCUMULATE_GRAD_BATCHES="${ACCUMULATE_GRAD_BATCHES:-8}"
+
 SKIP_FIRST_N=0
 EXTRA_ARGS=()
 
@@ -54,10 +74,7 @@ if ! [[ "${SKIP_FIRST_N}" =~ ^[0-9]+$ ]]; then
   echo "--skip must be a non-negative integer, got: ${SKIP_FIRST_N}"
   exit 1
 fi
-<<<<<<< HEAD
->>>>>>> d5cb6d1 (Introduces  argument to segmentation batch script)
-=======
->>>>>>> 65300ee (new condig files)
+
 
 AUTO_BACKBONE_CHECKPOINTS="${AUTO_BACKBONE_CHECKPOINTS:-false}"
 CV_BACKBONE_ROOT="${CV_BACKBONE_ROOT:-results/cv-model-matrix}"
@@ -92,6 +109,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+
 if ! [[ "${SKIP_FIRST_N}" =~ ^[0-9]+$ ]]; then
   echo "--skip must be a non-negative integer, got: ${SKIP_FIRST_N}"
   exit 1
@@ -123,13 +141,11 @@ else
   TRAIN_CMD_LIST=(python)
 fi
 
-EXTRA_ARGS=("$@")
-FAILED_RUNS=()
-RUN_INDEX=0
 GRAD_ACCUM_ARGS=()
 if [ -n "${ACCUMULATE_GRAD_BATCHES}" ]; then
   GRAD_ACCUM_ARGS=(trainer.accumulate_grad_batches="${ACCUMULATE_GRAD_BATCHES}")
 fi
+
 
 for dataset in "${DATASET_LIST[@]}"; do
   for optimizer in "${OPTIMIZER_LIST[@]}"; do
@@ -357,12 +373,19 @@ for dataset in "${DATASET_LIST[@]}"; do
   done
 done
 
-if [ "${#FAILED_RUNS[@]}" -gt 0 ]; then
-  echo
-  echo "Completed with failures:"
-  printf '  - %s\n' "${FAILED_RUNS[@]}"
-  exit 1
-fi
+echo "Completed ${ran} experiment(s) from RUN_SET=${RUN_SET}."
 
-echo
-echo "All segmentation runs completed."
+"${TRAIN_CMD_LIST[@]}" train.py -m \
+  task=semantic_segmentation \
+  datamodule="${DATASETS}" \
+  model="${MODELS}" \
+  optimizer="${OPTIMIZERS}" \
+  trainer.accelerator="${ACCELERATOR}" \
+  trainer.devices="${DEVICES}" \
+  trainer.precision="${PRECISION}" \
+  trainer.compile="${COMPILE}" \
+  "${GRAD_ACCUM_ARGS[@]}" \
+  logger.project="${WANDB_PROJECT}" \
+  'logger.name=seg_${hydra:runtime.choices.datamodule}_${hydra:runtime.choices.model}_${hydra:runtime.choices.optimizer}' \
+  "$@"
+

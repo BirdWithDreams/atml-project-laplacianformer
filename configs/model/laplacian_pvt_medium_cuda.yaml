@@ -2,8 +2,16 @@ name: "laplacian_pvt_medium_cuda"
 backbone_type: "pvt"
 attn_type: "laplacian"
 laplacian_backend: "cuda"
+<<<<<<< HEAD
 img_size: 224
+=======
+<<<<<<< HEAD
+img_size: 320
+>>>>>>> df3ba8f (Remove `laplacian_fallback_to_torch` and enforce CUDA-only Laplacian attention backend across all configs and tasks)
 backbone_checkpoint_path: null
+=======
+img_size: 224
+>>>>>>> cf14afd (Remove `laplacian_fallback_to_torch` and enforce CUDA-only Laplacian attention backend across all configs and tasks)
 
 embed_dims: [80, 160, 400, 640]
 depths: [4, 6, 12, 4]

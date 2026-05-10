@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .laplacian_attn import LaplacianLinearAttention
+from .laplacian_fast_attn import FastCudaLaplacianLinearAttention
 from .rope import apply_2d_rope
 
 
@@ -77,7 +77,7 @@ class PyramidBlock(nn.Module):
     def __init__(
             self, dim: int, num_heads: int, mlp_ratio: float, attn_type: str,
             pool_ratio: int, lambda_scale: float, ns_iters: int, use_rope: bool,
-            rope_base: float
+            rope_base: float, laplacian_backend: str = "cuda",
             ):
         super().__init__()
         self.attn_type = attn_type
@@ -90,7 +90,10 @@ class PyramidBlock(nn.Module):
                 rope_base=rope_base,
             )
         elif attn_type == "laplacian":
-            self.attn = LaplacianLinearAttention(
+            if laplacian_backend != "cuda":
+                raise ValueError("Laplacian PVT attention supports only laplacian_backend='cuda'")
+
+            self.attn = FastCudaLaplacianLinearAttention(
                 dim=dim,
                 num_heads=num_heads,
                 lambda_scale=lambda_scale,
@@ -120,7 +123,8 @@ class PyramidStage(nn.Module):
     def __init__(
             self, in_channels: int, embed_dim: int, depth: int, num_heads: int, mlp_ratio: float,
             patch_size: int, stride: int, padding: int, attn_type: str, pool_ratio: int,
-            lambda_scale: float, ns_iters: int, use_rope: bool, rope_base: float
+            lambda_scale: float, ns_iters: int, use_rope: bool, rope_base: float,
+            laplacian_backend: str = "cuda",
             ):
         super().__init__()
         self.patch_embed = PyramidPatchEmbedding(in_channels, embed_dim, patch_size, stride, padding)
@@ -136,6 +140,7 @@ class PyramidStage(nn.Module):
                     ns_iters=ns_iters,
                     use_rope=use_rope,
                     rope_base=rope_base,
+                    laplacian_backend=laplacian_backend,
                 )
                 for _ in range(depth)
             ]
@@ -167,7 +172,8 @@ class PyramidVisionBackbone(nn.Module):
             paddings: tuple[int, ...] = (3, 1, 1, 1),
             pool_ratios: tuple[int, ...] = (8, 4, 2, 1),
             attn_type: str = "laplacian", lambda_scale: float = 4.0, ns_iters: int = 5,
-            use_rope: bool = True, rope_base: float = 10000.0
+            use_rope: bool = True, rope_base: float = 10000.0,
+            laplacian_backend: str = "cuda",
             ):
         super().__init__()
         stage_lengths = {
@@ -200,6 +206,7 @@ class PyramidVisionBackbone(nn.Module):
                 ns_iters=ns_iters,
                 use_rope=use_rope,
                 rope_base=rope_base,
+                laplacian_backend=laplacian_backend,
             )
             self.stages.append(stage)
             current_channels = embed_dim
