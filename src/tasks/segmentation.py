@@ -319,6 +319,40 @@ class FocalDiceLoss(nn.Module):
         return 1.0 - dice.mean()
 
 
+class WarmupPolyLR(torch.optim.lr_scheduler.LambdaLR):
+    def __init__(
+            self,
+            optimizer: torch.optim.Optimizer,
+            max_iters: int,
+            warmup_iters: int = 1500,
+            power: float = 0.9,
+            ):
+        max_iters = int(max_iters)
+        warmup_iters = int(warmup_iters)
+        power = float(power)
+        if max_iters <= 0:
+            raise ValueError(f"max_iters must be positive for WarmupPolyLR, got {max_iters}.")
+        if warmup_iters < 0:
+            raise ValueError(f"warmup_iters must be non-negative, got {warmup_iters}.")
+        if warmup_iters >= max_iters:
+            raise ValueError(
+                "warmup_iters must be smaller than max_iters for WarmupPolyLR; "
+                f"got warmup_iters={warmup_iters}, max_iters={max_iters}."
+            )
+
+        def lr_lambda(current_step: int) -> float:
+            current_step = min(max(int(current_step), 0), max_iters)
+            if warmup_iters > 0 and current_step < warmup_iters:
+                return float(current_step + 1) / float(warmup_iters)
+
+            decay_iters = max(max_iters - warmup_iters, 1)
+            decay_step = min(max(current_step - warmup_iters, 0), decay_iters)
+            decay_progress = float(decay_step) / float(decay_iters)
+            return max(1.0 - decay_progress, 0.0) ** power
+
+        super().__init__(optimizer, lr_lambda=lr_lambda)
+
+
 class SemanticSegmentationTask(L.LightningModule):
     def __init__(
             self,

@@ -15,4 +15,4 @@ task:
 trainer:
   max_epochs: -1
   max_steps: ${datamodule.segmentation_max_iters}
-  accumulate_grad_batches: 4
+  accumulate_grad_batches: 2

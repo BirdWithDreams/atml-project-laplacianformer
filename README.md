@@ -27,10 +27,16 @@ On Windows PowerShell:
 On macOS or Linux:
 
 ```bash
-source .venv/bin/activate
+uv run train.py task=semantic_segmentation model=vanilla_pvt_small datamodule=voc2012_segmentation
+uv run train.py task=semantic_segmentation model=vanilla_pvt_small datamodule=cityscapes_segmentation
+uv run train.py task=semantic_segmentation model=laplacian_pvt_small_cuda datamodule=voc2012_segmentation trainer.precision=32
 ```
 
-Install dependencies with:
+Cityscapes uses the 5k fine-annotation split and expects the downloaded files
+under `./data/cityscapes/leftImg8bit/{train,val}` and
+`./data/cityscapes/gtFine/{train,val}`.
+
+Text classification:
 
 ```bash
 uv run train.py task=nlp_classification model=vanilla_1d_small datamodule=sst2
@@ -167,7 +173,9 @@ Both scripts accept space-separated environment overrides, for example:
 >>>>>>> 17fd14d (Introduces  argument to segmentation batch script)
 
 ```bash
-python train.py task=nlp_classification model=laplacian_small datamodule=sst2
+MODELS="vanilla_pvt_small laplacian_pvt_small_cuda" \
+DATASETS="voc2012_segmentation cityscapes_segmentation" \
+scripts/run_segmentation_model_matrix.sh
 ```
 
 ### NER
