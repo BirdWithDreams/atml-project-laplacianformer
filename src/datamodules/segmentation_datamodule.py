@@ -65,52 +65,37 @@ class VOCSegmentationWrapper(Dataset):
         return self.transform(image, mask)
 
 
-class CocoSemanticSegmentationDataset(Dataset):
+class CityscapesSegmentationWrapper(Dataset):
     def __init__(
             self,
-            image_root: str,
-            annotation_file: str,
+            dataset: Dataset,
             transform: SegmentationTransform,
             ignore_index: int = 255,
             ):
-        try:
-            import pycocotools  # noqa: F401
-        except ImportError as exc:
-            raise ImportError(
-                "COCO segmentation requires pycocotools. Install it with "
-                "`pip install pycocotools` or from requirements.txt."
-            ) from exc
-
-        if not os.path.isdir(image_root):
-            raise FileNotFoundError(f"COCO image directory not found: {image_root}")
-        if not os.path.isfile(annotation_file):
-            raise FileNotFoundError(f"COCO annotation file not found: {annotation_file}")
-
-        self.dataset = torchvision.datasets.CocoDetection(image_root, annotation_file)
+        self.dataset = dataset
         self.transform = transform
-        self.ignore_index = ignore_index
-        category_ids = sorted(self.dataset.coco.getCatIds())
-        self.category_id_to_class = {
-            category_id: class_index + 1 for class_index, category_id in enumerate(category_ids)
-        }
+        self.label_id_to_train_id = self._build_label_id_to_train_id(ignore_index)
+
+    @staticmethod
+    def _build_label_id_to_train_id(ignore_index: int) -> np.ndarray:
+        label_id_to_train_id = np.full(256, ignore_index, dtype=np.uint8)
+        for cityscapes_class in torchvision.datasets.Cityscapes.classes:
+            label_id = cityscapes_class.id
+            train_id = cityscapes_class.train_id
+            if 0 <= label_id < label_id_to_train_id.shape[0]:
+                label_id_to_train_id[label_id] = (
+                    train_id if 0 <= train_id < ignore_index else ignore_index
+                )
+        return label_id_to_train_id
 
     def __len__(self) -> int:
         return len(self.dataset)
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
-        image, annotations = self.dataset[index]
-        width, height = image.size
-        mask = np.zeros((height, width), dtype=np.uint8)
-
-        for annotation in annotations:
-            annotation_mask = self.dataset.coco.annToMask(annotation).astype(bool)
-            if annotation.get("iscrowd", 0):
-                mask[annotation_mask] = self.ignore_index
-            else:
-                class_index = self.category_id_to_class[annotation["category_id"]]
-                mask[annotation_mask] = class_index
-
-        return self.transform(image, Image.fromarray(mask))
+        image, mask = self.dataset[index]
+        mask_array = np.array(mask, dtype=np.uint8)
+        mask = Image.fromarray(self.label_id_to_train_id[mask_array])
+        return self.transform(image, mask)
 
 
 class SegmentationDataModule(L.LightningDataModule):
@@ -124,7 +109,7 @@ class SegmentationDataModule(L.LightningDataModule):
             num_classes: Optional[int] = None,
             ignore_index: int = 255,
             download: bool = True,
-            coco_year: str = "2017",
+            cityscapes_mode: str = "fine",
             max_train_samples: Optional[int] = None,
             max_val_samples: Optional[int] = None,
             max_test_samples: Optional[int] = None,
@@ -139,7 +124,7 @@ class SegmentationDataModule(L.LightningDataModule):
         self.num_classes = num_classes or self._infer_num_classes(self.dataset_name)
         self.ignore_index = ignore_index
         self.download = download
-        self.coco_year = str(coco_year)
+        self.cityscapes_mode = str(cityscapes_mode)
         self.max_train_samples = max_train_samples
         self.max_val_samples = max_val_samples
         self.max_test_samples = max_test_samples
@@ -152,8 +137,8 @@ class SegmentationDataModule(L.LightningDataModule):
     def _infer_num_classes(dataset_name: str) -> int:
         if dataset_name in {"voc", "voc2012", "pascal_voc", "pascal_voc2012"}:
             return 21
-        if dataset_name in {"coco", "coco2017", "ms_coco", "ms_coco2017"}:
-            return 81
+        if dataset_name in {"cityscapes", "cityscapes_fine"}:
+            return 19
         raise ValueError(f"Unknown segmentation dataset: {dataset_name}")
 
     def prepare_data(self):
@@ -170,24 +155,29 @@ class SegmentationDataModule(L.LightningDataModule):
                 image_set="val",
                 download=self.download,
             )
+        elif self._is_cityscapes and self.download:
+            raise ValueError(
+                "Cityscapes cannot be downloaded automatically. Download the fine annotations "
+                "and leftImg8bit files manually, then place them under data_dir/cityscapes."
+            )
 
     @property
     def _is_voc(self) -> bool:
         return self.dataset_name in {"voc", "voc2012", "pascal_voc", "pascal_voc2012"}
 
     @property
-    def _is_coco(self) -> bool:
-        return self.dataset_name in {"coco", "coco2017", "ms_coco", "ms_coco2017"}
+    def _is_cityscapes(self) -> bool:
+        return self.dataset_name in {"cityscapes", "cityscapes_fine"}
 
     def setup(self, stage=None):
         if self._is_voc:
             train_dataset = self._build_voc_dataset("train", self.train_transform)
             val_dataset = self._build_voc_dataset("val", self.eval_transform)
             test_dataset = self._build_voc_dataset("val", self.eval_transform)
-        elif self._is_coco:
-            train_dataset = self._build_coco_dataset("train", self.train_transform)
-            val_dataset = self._build_coco_dataset("val", self.eval_transform)
-            test_dataset = self._build_coco_dataset("val", self.eval_transform)
+        elif self._is_cityscapes:
+            train_dataset = self._build_cityscapes_dataset("train", self.train_transform)
+            val_dataset = self._build_cityscapes_dataset("val", self.eval_transform)
+            test_dataset = self._build_cityscapes_dataset("val", self.eval_transform)
         else:
             raise ValueError(f"Unknown segmentation dataset: {self.dataset_name}")
 
@@ -206,18 +196,16 @@ class SegmentationDataModule(L.LightningDataModule):
         )
         return VOCSegmentationWrapper(dataset, transform)
 
-    def _build_coco_dataset(self, split: str, transform: SegmentationTransform) -> Dataset:
-        image_root = os.path.join(self.data_dir, "coco", f"{split}{self.coco_year}")
-        annotation_file = os.path.join(
-            self.data_dir,
-            "coco",
-            "annotations",
-            f"instances_{split}{self.coco_year}.json",
+    def _build_cityscapes_dataset(self, split: str, transform: SegmentationTransform) -> Dataset:
+        dataset = torchvision.datasets.Cityscapes(
+            root=os.path.join(self.data_dir, "cityscapes"),
+            split=split,
+            mode=self.cityscapes_mode,
+            target_type="semantic",
         )
-        return CocoSemanticSegmentationDataset(
-            image_root=image_root,
-            annotation_file=annotation_file,
-            transform=transform,
+        return CityscapesSegmentationWrapper(
+            dataset,
+            transform,
             ignore_index=self.ignore_index,
         )
 

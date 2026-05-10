@@ -148,6 +148,40 @@ class FocalDiceLoss(nn.Module):
         return 1.0 - dice.mean()
 
 
+class WarmupPolyLR(torch.optim.lr_scheduler.LambdaLR):
+    def __init__(
+            self,
+            optimizer: torch.optim.Optimizer,
+            max_iters: int,
+            warmup_iters: int = 1500,
+            power: float = 0.9,
+            ):
+        max_iters = int(max_iters)
+        warmup_iters = int(warmup_iters)
+        power = float(power)
+        if max_iters <= 0:
+            raise ValueError(f"max_iters must be positive for WarmupPolyLR, got {max_iters}.")
+        if warmup_iters < 0:
+            raise ValueError(f"warmup_iters must be non-negative, got {warmup_iters}.")
+        if warmup_iters >= max_iters:
+            raise ValueError(
+                "warmup_iters must be smaller than max_iters for WarmupPolyLR; "
+                f"got warmup_iters={warmup_iters}, max_iters={max_iters}."
+            )
+
+        def lr_lambda(current_step: int) -> float:
+            current_step = min(max(int(current_step), 0), max_iters)
+            if warmup_iters > 0 and current_step < warmup_iters:
+                return float(current_step + 1) / float(warmup_iters)
+
+            decay_iters = max(max_iters - warmup_iters, 1)
+            decay_step = min(max(current_step - warmup_iters, 0), decay_iters)
+            decay_progress = float(decay_step) / float(decay_iters)
+            return max(1.0 - decay_progress, 0.0) ** power
+
+        super().__init__(optimizer, lr_lambda=lr_lambda)
+
+
 class SemanticSegmentationTask(L.LightningModule):
     def __init__(
             self,
@@ -155,6 +189,12 @@ class SemanticSegmentationTask(L.LightningModule):
             lr: float = 3e-4,
             weight_decay: float = 0.05,
             optimizer: str = "AdamW",
+            optimizer_betas: tuple[float, float] | list[float] = (0.9, 0.999),
+            decoder_lr_multiplier: float = 10.0,
+            scheduler: str = "warmup_poly",
+            max_iters: int = 80000,
+            warmup_iters: int = 1500,
+            poly_power: float = 0.9,
             model_cfg: dict = None,
             ignore_index: int = 255,
             log_segmentation_images: bool = True,
@@ -366,23 +406,56 @@ class SemanticSegmentationTask(L.LightningModule):
         return mask.detach().to(torch.int32).cpu().numpy()
 
     def configure_optimizers(self):
-        if self.hparams.optimizer == "AdamW":
-            optimizer = torch.optim.AdamW(
-                self.parameters(),
-                lr=self.hparams.lr,
-                weight_decay=self.hparams.weight_decay,
+        if self.hparams.optimizer != "AdamW":
+            raise ValueError(
+                "SemanticSegmentationTask supports only AdamW because it uses "
+                "backbone/decoder parameter groups."
             )
-        else:
-            optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
 
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        betas = tuple(float(beta) for beta in self.hparams.optimizer_betas)
+        if len(betas) != 2:
+            raise ValueError(f"optimizer_betas must contain two values, got {betas}.")
+
+        base_lr = float(self.hparams.lr)
+        decoder_lr = base_lr * float(self.hparams.decoder_lr_multiplier)
+        optimizer = torch.optim.AdamW(
+            [
+                {
+                    "name": "backbone",
+                    "params": self.model.backbone.parameters(),
+                    "lr": base_lr,
+                },
+                {
+                    "name": "decoder",
+                    "params": [
+                        *self.model.projections.parameters(),
+                        *self.model.fuse.parameters(),
+                        *self.model.segmentation_head.parameters(),
+                    ],
+                    "lr": decoder_lr,
+                },
+            ],
+            betas=betas,
+            weight_decay=float(self.hparams.weight_decay),
+        )
+
+        if self.hparams.scheduler != "warmup_poly":
+            raise ValueError(
+                "SemanticSegmentationTask supports only scheduler='warmup_poly', "
+                f"got {self.hparams.scheduler!r}."
+            )
+
+        scheduler = WarmupPolyLR(
             optimizer,
-            T_max=self.trainer.max_epochs,
+            max_iters=int(self.hparams.max_iters),
+            warmup_iters=int(self.hparams.warmup_iters),
+            power=float(self.hparams.poly_power),
         )
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
-                "interval": "epoch",
+                "interval": "step",
+                "frequency": 1,
             },
         }

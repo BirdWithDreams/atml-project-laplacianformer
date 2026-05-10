@@ -14,15 +14,15 @@ to_csv() {
 }
 
 MODELS="$(to_csv "${MODELS:-laplacian_pvt_medium_cuda laplacian_pvt_small_cuda vanilla_pvt_small vanilla_pvt_medium}")"
-OPTIMIZERS="$(to_csv "${OPTIMIZERS:-adamw_cv_default}")"
-DATASETS="$(to_csv "${DATASETS:-coco_segmentation voc2012_segmentation}")"
+OPTIMIZERS="$(to_csv "${OPTIMIZERS:-adamw_segmentation_poly}")"
+DATASETS="$(to_csv "${DATASETS:-cityscapes_segmentation voc2012_segmentation}")"
 
 ACCELERATOR="${ACCELERATOR:-gpu}"
 DEVICES="${DEVICES:-1}"
-PRECISION="${PRECISION:-16}"
+PRECISION="${PRECISION:-32}"
 COMPILE="${COMPILE:-false}"
 WANDB_PROJECT="${WANDB_PROJECT:-segmentation-model-matrix}"
-ACCUMULATE_GRAD_BATCHES="${ACCUMULATE_GRAD_BATCHES:-8}"
+ACCUMULATE_GRAD_BATCHES="${ACCUMULATE_GRAD_BATCHES:-2}"
 
 if [ -n "${TRAIN_CMD:-}" ]; then
   read -r -a TRAIN_CMD_LIST <<< "${TRAIN_CMD}"
