@@ -1,0 +1,8 @@
+name: "torchvision_fcn_resnet50"
+backbone_type: "torchvision"
+architecture: "fcn_resnet50"
+img_size: 320
+
+weights: "DEFAULT"
+weights_backbone: null
+aux_loss: null
