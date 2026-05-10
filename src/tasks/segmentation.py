@@ -28,6 +28,16 @@ class SegmentationMetrics(Metric):
         )
         self.add_state("correct", default=torch.tensor(0.0), dist_reduce_fx="sum")
         self.add_state("total", default=torch.tensor(0.0), dist_reduce_fx="sum")
+        self.add_state(
+            "pred_pixels",
+            default=torch.zeros(num_classes, dtype=torch.float),
+            dist_reduce_fx="sum",
+        )
+        self.add_state(
+            "target_pixels",
+            default=torch.zeros(num_classes, dtype=torch.float),
+            dist_reduce_fx="sum",
+        )
 
     def update(self, preds: torch.Tensor, target: torch.Tensor):
         valid = target != self.ignore_index
@@ -44,16 +54,34 @@ class SegmentationMetrics(Metric):
             target_mask = target == class_index
             self.intersections[class_index] += (pred_mask & target_mask).sum().float()
             self.unions[class_index] += (pred_mask | target_mask).sum().float()
+            self.pred_pixels[class_index] += pred_mask.sum().float()
+            self.target_pixels[class_index] += target_mask.sum().float()
 
     def compute(self) -> dict[str, torch.Tensor]:
         valid_classes = self.unions > 0
+        iou_per_class = self.intersections / torch.clamp(self.unions, min=1.0)
         if valid_classes.any():
-            mean_iou = (self.intersections[valid_classes] / self.unions[valid_classes]).mean()
+            mean_iou = iou_per_class[valid_classes].mean()
         else:
             mean_iou = torch.tensor(0.0, device=self.intersections.device)
 
+        class_indices = torch.arange(self.num_classes, device=self.unions.device)
+        foreground_classes = valid_classes & (class_indices != 0)
+        if foreground_classes.any():
+            foreground_miou = iou_per_class[foreground_classes].mean()
+        else:
+            foreground_miou = torch.tensor(0.0, device=self.intersections.device)
+
         pixel_acc = self.correct / torch.clamp(self.total, min=1.0)
-        return {"mIoU": mean_iou, "pixel_acc": pixel_acc}
+        pred_background_fraction = self.pred_pixels[0] / torch.clamp(self.pred_pixels.sum(), min=1.0)
+        target_background_fraction = self.target_pixels[0] / torch.clamp(self.target_pixels.sum(), min=1.0)
+        return {
+            "mIoU": mean_iou,
+            "foreground_mIoU": foreground_miou,
+            "pixel_acc": pixel_acc,
+            "pred_background_fraction": pred_background_fraction,
+            "target_background_fraction": target_background_fraction,
+        }
 
 
 class FocalDiceLoss(nn.Module):
@@ -63,9 +91,11 @@ class FocalDiceLoss(nn.Module):
             ignore_index: int = 255,
             focal_gamma: float = 2.0,
             focal_alpha: float | list[float] | tuple[float, ...] | None = None,
+            class_weights: list[float] | tuple[float, ...] | None = None,
             focal_weight: float = 1.0,
             dice_weight: float = 1.0,
             dice_smooth: float = 1e-5,
+            dice_present_classes_only: bool = True,
             ):
         super().__init__()
         self.num_classes = int(num_classes)
@@ -77,6 +107,7 @@ class FocalDiceLoss(nn.Module):
         self.focal_weight = float(focal_weight)
         self.dice_weight = float(dice_weight)
         self.dice_smooth = float(dice_smooth)
+        self.dice_present_classes_only = bool(dice_present_classes_only)
 
         class_alpha = None
         if focal_alpha is not None and self.focal_alpha_scalar is None:
@@ -86,7 +117,16 @@ class FocalDiceLoss(nn.Module):
                     "focal_alpha must be a scalar or provide one weight per class; "
                     f"got {class_alpha.numel()} weights for {self.num_classes} classes."
                 )
+        ce_weights = None
+        if class_weights is not None:
+            ce_weights = torch.as_tensor(list(class_weights), dtype=torch.float)
+            if ce_weights.numel() != self.num_classes:
+                raise ValueError(
+                    "class_weights must provide one weight per class; "
+                    f"got {ce_weights.numel()} weights for {self.num_classes} classes."
+                )
         self.register_buffer("class_alpha", class_alpha, persistent=False)
+        self.register_buffer("ce_weights", ce_weights, persistent=False)
 
     def forward(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         valid = target != self.ignore_index
@@ -107,6 +147,7 @@ class FocalDiceLoss(nn.Module):
             logits,
             target,
             ignore_index=self.ignore_index,
+            weight=self.ce_weights.to(logits.device) if self.ce_weights is not None else None,
             reduction="none",
         )
         pt = torch.exp(-ce_loss)
@@ -145,6 +186,10 @@ class FocalDiceLoss(nn.Module):
         intersection = (probs * target_one_hot).sum(dim=reduce_dims)
         denominator = probs.sum(dim=reduce_dims) + target_one_hot.sum(dim=reduce_dims)
         dice = (2.0 * intersection + self.dice_smooth) / (denominator + self.dice_smooth)
+        if self.dice_present_classes_only:
+            present_classes = target_one_hot.sum(dim=reduce_dims) > 0
+            if present_classes.any():
+                return 1.0 - dice[present_classes].mean()
         return 1.0 - dice.mean()
 
 
@@ -202,9 +247,11 @@ class SemanticSegmentationTask(L.LightningModule):
             log_segmentation_images_every_n_epochs: int = 1,
             focal_gamma: float = 2.0,
             focal_alpha: float | list[float] | tuple[float, ...] | None = None,
+            class_weights: list[float] | tuple[float, ...] | None = None,
             focal_loss_weight: float = 1.0,
             dice_loss_weight: float = 1.0,
             dice_smooth: float = 1e-5,
+            dice_present_classes_only: bool = True,
             ):
         super().__init__()
         self.save_hyperparameters()
@@ -236,16 +283,22 @@ class SemanticSegmentationTask(L.LightningModule):
             decoder_dim=model_cfg.get("decoder_dim", 128),
             decoder_norm_groups=model_cfg.get("decoder_norm_groups", 32),
             segmentation_head_dim=model_cfg.get("segmentation_head_dim", 64),
+            segmentation_head_layers=model_cfg.get("segmentation_head_layers", 2),
             dropout=model_cfg.get("dropout", 0.1),
         )
+        if model_cfg.get("backbone_checkpoint_path", None):
+            self._load_backbone_checkpoint(model_cfg["backbone_checkpoint_path"])
+
         self.criterion = FocalDiceLoss(
             num_classes=num_classes,
             ignore_index=ignore_index,
             focal_gamma=focal_gamma,
             focal_alpha=focal_alpha,
+            class_weights=class_weights,
             focal_weight=focal_loss_weight,
             dice_weight=dice_loss_weight,
             dice_smooth=dice_smooth,
+            dice_present_classes_only=dice_present_classes_only,
         )
         self.val_metrics = SegmentationMetrics(num_classes=num_classes, ignore_index=ignore_index)
         self.test_metrics = SegmentationMetrics(num_classes=num_classes, ignore_index=ignore_index)
@@ -254,6 +307,35 @@ class SemanticSegmentationTask(L.LightningModule):
 
     def forward(self, images: torch.Tensor) -> torch.Tensor:
         return self.model(images)
+
+    def _load_backbone_checkpoint(self, checkpoint_path: str):
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        state_dict = checkpoint.get("state_dict", checkpoint)
+        backbone_state = self.model.backbone.state_dict()
+        candidate_state = {}
+
+        for key, value in state_dict.items():
+            stripped_key = key.removeprefix("module.")
+            for prefix in ("model.backbone.", "backbone."):
+                if stripped_key.startswith(prefix):
+                    candidate_state[stripped_key.removeprefix(prefix)] = value
+                    break
+            elif stripped_key in backbone_state:
+                candidate_state[stripped_key] = value
+
+        compatible_state = {
+            key: value
+            for key, value in candidate_state.items()
+            if (
+                key in backbone_state
+                and hasattr(value, "shape")
+                and tuple(value.shape) == tuple(backbone_state[key].shape)
+            )
+        }
+        if not compatible_state:
+            raise ValueError(f"No compatible backbone tensors found in checkpoint: {checkpoint_path}")
+
+        self.model.backbone.load_state_dict(compatible_state, strict=False)
 
     def training_step(self, batch, batch_idx):
         images, masks = batch
@@ -289,7 +371,10 @@ class SemanticSegmentationTask(L.LightningModule):
     def on_validation_epoch_end(self):
         metrics = self.val_metrics.compute()
         self.log("val/mIoU", metrics["mIoU"], prog_bar=True)
+        self.log("val/foreground_mIoU", metrics["foreground_mIoU"])
         self.log("val/pixel_acc", metrics["pixel_acc"])
+        self.log("val/pred_background_fraction", metrics["pred_background_fraction"])
+        self.log("val/target_background_fraction", metrics["target_background_fraction"])
         self.val_metrics.reset()
 
     def test_step(self, batch, batch_idx):
@@ -309,7 +394,10 @@ class SemanticSegmentationTask(L.LightningModule):
     def on_test_epoch_end(self):
         metrics = self.test_metrics.compute()
         self.log("test/mIoU", metrics["mIoU"])
+        self.log("test/foreground_mIoU", metrics["foreground_mIoU"])
         self.log("test/pixel_acc", metrics["pixel_acc"])
+        self.log("test/pred_background_fraction", metrics["pred_background_fraction"])
+        self.log("test/target_background_fraction", metrics["target_background_fraction"])
         self.test_metrics.reset()
 
     @staticmethod

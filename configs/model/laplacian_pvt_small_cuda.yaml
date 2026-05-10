@@ -2,7 +2,8 @@ name: "laplacian_pvt_small_cuda"
 backbone_type: "pvt"
 attn_type: "laplacian"
 laplacian_backend: "cuda"
-img_size: 224
+img_size: 320
+backbone_checkpoint_path: null
 
 embed_dims: [64, 128, 320, 512]
 depths: [4, 6, 12, 4]
@@ -18,7 +19,8 @@ ns_iters: 5
 use_rope: true
 rope_base: 10000.0
 
-decoder_dim: 128
+decoder_dim: 256
 decoder_norm_groups: 32
-segmentation_head_dim: 64
-dropout: 0.1
+segmentation_head_dim: 128
+segmentation_head_layers: 2
+dropout: 0.0
