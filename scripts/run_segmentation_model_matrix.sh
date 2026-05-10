@@ -10,12 +10,13 @@ usage() {
 Run staged semantic-segmentation baseline experiments.
 
 Default RUN_SET=baseline runs:
-  1. VOC vanilla small sanity baseline
-  2. VOC Laplacian small comparison
-  3. VOC vanilla medium capacity baseline
-  4. VOC Laplacian medium comparison
-  5. Cityscapes vanilla small transfer check
-  6. Cityscapes Laplacian small comparison
+  1. VOC torchvision DeepLabV3 pretrained sanity baseline
+  2. VOC vanilla small scratch baseline
+  3. VOC Laplacian small scratch comparison
+  4. VOC vanilla medium capacity baseline
+  5. VOC Laplacian medium capacity comparison
+  6. Cityscapes vanilla small transfer check
+  7. Cityscapes Laplacian small comparison
 
 Environment overrides:
   RUN_SET=smoke|baseline|full
@@ -115,10 +116,12 @@ add_experiment() {
 
 case "${RUN_SET}" in
   smoke)
+    add_experiment "voc_torchvision_deeplabv3_pretrained_smoke" "voc2012_segmentation" "torchvision_deeplabv3_resnet50"
     add_experiment "voc_vanilla_small_smoke" "voc2012_segmentation" "vanilla_pvt_small"
     add_experiment "voc_laplacian_small_smoke" "voc2012_segmentation" "laplacian_pvt_small_cuda"
     ;;
   baseline)
+    add_experiment "voc_torchvision_deeplabv3_pretrained_sanity" "voc2012_segmentation" "torchvision_deeplabv3_resnet50"
     add_experiment "voc_vanilla_small_baseline" "voc2012_segmentation" "vanilla_pvt_small"
     add_experiment "voc_laplacian_small_baseline" "voc2012_segmentation" "laplacian_pvt_small_cuda"
     add_experiment "voc_vanilla_medium_capacity" "voc2012_segmentation" "vanilla_pvt_medium"
@@ -127,6 +130,8 @@ case "${RUN_SET}" in
     add_experiment "cityscapes_laplacian_small_baseline" "cityscapes_segmentation" "laplacian_pvt_small_cuda"
     ;;
   full)
+    add_experiment "voc_torchvision_deeplabv3_pretrained_sanity" "voc2012_segmentation" "torchvision_deeplabv3_resnet50"
+    add_experiment "voc_torchvision_fcn_pretrained_sanity" "voc2012_segmentation" "torchvision_fcn_resnet50"
     add_experiment "voc_vanilla_small_baseline" "voc2012_segmentation" "vanilla_pvt_small"
     add_experiment "voc_laplacian_small_baseline" "voc2012_segmentation" "laplacian_pvt_small_cuda"
     add_experiment "voc_vanilla_medium_capacity" "voc2012_segmentation" "vanilla_pvt_medium"
