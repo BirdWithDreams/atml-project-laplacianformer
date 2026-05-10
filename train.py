@@ -173,7 +173,7 @@ def main(cfg: DictConfig):
             num_classes=cfg.datamodule.num_classes,
             ignore_index=cfg.datamodule.get("ignore_index", 255),
             download=cfg.datamodule.get("download", True),
-            coco_year=cfg.datamodule.get("coco_year", "2017"),
+            cityscapes_mode=cfg.datamodule.get("cityscapes_mode", "fine"),
             max_train_samples=cfg.datamodule.get("max_train_samples", None),
             max_val_samples=cfg.datamodule.get("max_val_samples", None),
             max_test_samples=cfg.datamodule.get("max_test_samples", None),
@@ -231,6 +231,12 @@ def main(cfg: DictConfig):
             lr=lr,
             weight_decay=weight_decay,
             optimizer=optimizer_name,
+            optimizer_betas=cfg.optimizer.get("betas", [0.9, 0.999]),
+            decoder_lr_multiplier=cfg.optimizer.get("decoder_lr_multiplier", 10.0),
+            scheduler=cfg.optimizer.get("scheduler", "warmup_poly"),
+            max_iters=cfg.optimizer.get("max_iters", cfg.trainer.get("max_steps", 80000)),
+            warmup_iters=cfg.optimizer.get("warmup_iters", 1500),
+            poly_power=cfg.optimizer.get("poly_power", 0.9),
             model_cfg=model_cfg,
             ignore_index=cfg.datamodule.get("ignore_index", 255),
             log_segmentation_images=cfg.logger.get("log_segmentation_images", True),
@@ -269,16 +275,22 @@ def main(cfg: DictConfig):
         "Using gradient accumulation: "
         f"{accumulate_grad_batches} step(s) with datamodule.batch_size={cfg.datamodule.batch_size}"
     )
+    trainer_kwargs = {
+        "max_epochs": cfg.trainer.max_epochs,
+        "accelerator": cfg.trainer.accelerator,
+        "devices": cfg.trainer.devices,
+        "precision": cfg.trainer.precision,
+        "accumulate_grad_batches": accumulate_grad_batches,
+        "gradient_clip_val": cfg.trainer.get("gradient_clip_val", None),
+        "log_every_n_steps": cfg.trainer.log_every_n_steps,
+        "logger": wandb_logger,
+        "callbacks": [checkpoint_callback],
+    }
+    if cfg.trainer.get("max_steps", None) is not None:
+        trainer_kwargs["max_steps"] = int(cfg.trainer.max_steps)
+
     trainer = L.Trainer(
-        max_epochs=cfg.trainer.max_epochs,
-        accelerator=cfg.trainer.accelerator,
-        devices=cfg.trainer.devices,
-        precision=cfg.trainer.precision,
-        accumulate_grad_batches=accumulate_grad_batches,
-        gradient_clip_val=cfg.trainer.get("gradient_clip_val", None),
-        log_every_n_steps=cfg.trainer.log_every_n_steps,
-        logger=wandb_logger,
-        callbacks=[checkpoint_callback],
+        **trainer_kwargs,
     )
 
     # 5. Train

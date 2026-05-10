@@ -167,7 +167,7 @@ def build_datamodule(task_name: str, datamodule_cfg: DictConfig, hparams: dict[s
             num_classes=datamodule_cfg.num_classes,
             ignore_index=datamodule_cfg.get("ignore_index", 255),
             download=False,
-            coco_year=datamodule_cfg.get("coco_year", "2017"),
+            cityscapes_mode=datamodule_cfg.get("cityscapes_mode", "fine"),
             max_test_samples=datamodule_cfg.get("max_test_samples", None),
             subset_seed=datamodule_cfg.get("subset_seed", 42),
         )

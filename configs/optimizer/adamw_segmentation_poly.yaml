@@ -1,0 +1,10 @@
+name: "adamw_segmentation_poly"
+optimizer: "AdamW"
+lr: 6e-5
+decoder_lr_multiplier: 10.0
+weight_decay: 0.01
+betas: [0.9, 0.999]
+scheduler: "warmup_poly"
+max_iters: ${datamodule.segmentation_max_iters}
+warmup_iters: 1500
+poly_power: 0.9

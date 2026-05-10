@@ -1,6 +1,6 @@
 # @package _global_
 defaults:
-  - override /optimizer: adamw_cv_default
+  - override /optimizer: adamw_segmentation_poly
   - override /model: laplacian_pvt_small_cuda
   - override /datamodule: voc2012_segmentation
 
@@ -13,4 +13,6 @@ task:
   dice_smooth: 0.00001
 
 trainer:
+  max_epochs: -1
+  max_steps: ${datamodule.segmentation_max_iters}
   accumulate_grad_batches: 2

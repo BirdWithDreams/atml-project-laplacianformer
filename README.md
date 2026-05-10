@@ -54,8 +54,13 @@ Semantic segmentation:
 
 ```bash
 uv run train.py task=semantic_segmentation model=vanilla_pvt_small datamodule=voc2012_segmentation
+uv run train.py task=semantic_segmentation model=vanilla_pvt_small datamodule=cityscapes_segmentation
 uv run train.py task=semantic_segmentation model=laplacian_pvt_small_cuda datamodule=voc2012_segmentation trainer.precision=32
 ```
+
+Cityscapes uses the 5k fine-annotation split and expects the downloaded files
+under `./data/cityscapes/leftImg8bit/{train,val}` and
+`./data/cityscapes/gtFine/{train,val}`.
 
 Text classification:
 
@@ -148,8 +153,7 @@ Both scripts accept space-separated environment overrides, for example:
 
 ```bash
 MODELS="vanilla_pvt_small laplacian_pvt_small_cuda" \
-DATASETS="voc2012_segmentation coco_segmentation" \
-MAX_EPOCHS=1 \
+DATASETS="voc2012_segmentation cityscapes_segmentation" \
 scripts/run_segmentation_model_matrix.sh
 ```
 
