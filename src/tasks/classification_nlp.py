@@ -68,10 +68,14 @@ class NLPClassificationTask(L.LightningModule):
 
         logits = self(input_ids, attention_mask)
         loss = self.criterion(logits, labels)
+        batch_size = labels.shape[0]
         self.train_acc(logits, labels)
+        acc_step = (torch.argmax(logits, dim=1) == labels).float().mean()
 
-        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log("train/acc", self.train_acc, on_step=True, on_epoch=True)
+        self.log("train/loss_step", loss, on_step=True, on_epoch=False, prog_bar=True, batch_size=batch_size)
+        self.log("train/loss_epoch", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=batch_size)
+        self.log("train/acc_step", acc_step, on_step=True, on_epoch=False, batch_size=batch_size)
+        self.log("train/acc_epoch", self.train_acc, on_step=False, on_epoch=True)
 
         return loss
 
@@ -82,13 +86,14 @@ class NLPClassificationTask(L.LightningModule):
 
         logits = self(input_ids, attention_mask)
         loss = self.criterion(logits, labels)
+        batch_size = labels.shape[0]
         
         self.val_acc(logits, labels)
         self.val_prec(logits, labels)
         self.val_rec(logits, labels)
         self.val_f1(logits, labels)
 
-        self.log("val/loss", loss, prog_bar=True)
+        self.log("val/loss", loss, prog_bar=True, batch_size=batch_size)
         self.log("val/acc", self.val_acc, prog_bar=True)
         self.log("val/precision", self.val_prec)
         self.log("val/recall", self.val_rec)
@@ -103,12 +108,13 @@ class NLPClassificationTask(L.LightningModule):
 
         logits = self(input_ids, attention_mask)
         loss = self.criterion(logits, labels)
+        batch_size = labels.shape[0]
         self.test_acc(logits, labels)
         self.test_prec(logits, labels)
         self.test_rec(logits, labels)
         self.test_f1(logits, labels)
 
-        self.log("test/loss", loss)
+        self.log("test/loss", loss, batch_size=batch_size)
         self.log("test/acc", self.test_acc, prog_bar=True)
         self.log("test/precision", self.test_prec)
         self.log("test/recall", self.test_rec)
