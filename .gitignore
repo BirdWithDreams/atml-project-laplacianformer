@@ -15,3 +15,5 @@ src/LaplacianFormer/build/
 /libs/laplacianformer/build/
 /libs/laplacianformer/Laplace_subtraction_cuda.cpython-310-x86_64-linux-gnu.so
 /libs/laplacianformer_1d/laplacian_1d_cuda.cpython-310-x86_64-linux-gnu.so
+
+multirun
