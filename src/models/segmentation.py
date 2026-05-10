@@ -5,11 +5,46 @@ import torch.nn.functional as F
 from src.models.pvt import PyramidVisionBackbone
 
 
+def _make_group_norm(num_channels: int, num_groups: int = 32) -> nn.GroupNorm:
+    if num_channels < 1 or num_groups < 1:
+        raise ValueError("num_channels and num_groups must be positive for GroupNorm")
+    groups = min(num_groups, num_channels)
+    while num_channels % groups != 0:
+        groups -= 1
+    return nn.GroupNorm(num_groups=groups, num_channels=num_channels)
+
+
+class SegmentationHead(nn.Module):
+    def __init__(
+            self,
+            in_channels: int,
+            num_classes: int,
+            hidden_channels: int = 64,
+            norm_groups: int = 32,
+            ):
+        super().__init__()
+        self.refine = nn.Sequential(
+            nn.Conv2d(in_channels, hidden_channels, kernel_size=3, padding=1, bias=False),
+            _make_group_norm(hidden_channels, norm_groups),
+            nn.ReLU(inplace=True),
+        )
+        self.classifier = nn.Conv2d(hidden_channels, num_classes, kernel_size=1)
+
+    def forward(self, features: torch.Tensor, output_size: tuple[int, int]) -> torch.Tensor:
+        features = F.interpolate(
+            features,
+            size=output_size,
+            mode="bilinear",
+            align_corners=False,
+        )
+        return self.classifier(self.refine(features))
+
+
 class PyramidSegmentationModel(nn.Module):
     """
     Lightweight semantic segmentation model built on the existing PVT backbone.
-    Multi-scale PVT feature maps are projected to a shared decoder dimension,
-    fused at the highest backbone resolution, and upsampled to the input size.
+    Multi-scale PVT feature maps are projected, fused with GroupNorm, upsampled
+    as features, and refined by a learned segmentation head at full resolution.
     """
 
     def __init__(
@@ -32,6 +67,8 @@ class PyramidSegmentationModel(nn.Module):
             rope_base: float = 10000.0,
             laplacian_backend: str = "cuda",
             decoder_dim: int = 128,
+            decoder_norm_groups: int = 32,
+            segmentation_head_dim: int = 64,
             dropout: float = 0.1,
             ):
         super().__init__()
@@ -57,15 +94,26 @@ class PyramidSegmentationModel(nn.Module):
             [nn.Conv2d(dim, decoder_dim, kernel_size=1) for dim in embed_dims]
         )
         self.fuse = nn.Sequential(
-            nn.Conv2d(decoder_dim * len(embed_dims), decoder_dim, kernel_size=3, padding=1),
-            nn.BatchNorm2d(decoder_dim),
+            nn.Conv2d(
+                decoder_dim * len(embed_dims),
+                decoder_dim,
+                kernel_size=3,
+                padding=1,
+                bias=False,
+            ),
+            _make_group_norm(decoder_dim, decoder_norm_groups),
             nn.GELU(),
             nn.Dropout2d(dropout),
-            nn.Conv2d(decoder_dim, decoder_dim, kernel_size=3, padding=1),
-            nn.BatchNorm2d(decoder_dim),
+            nn.Conv2d(decoder_dim, decoder_dim, kernel_size=3, padding=1, bias=False),
+            _make_group_norm(decoder_dim, decoder_norm_groups),
             nn.GELU(),
         )
-        self.classifier = nn.Conv2d(decoder_dim, num_classes, kernel_size=1)
+        self.segmentation_head = SegmentationHead(
+            in_channels=decoder_dim,
+            num_classes=num_classes,
+            hidden_channels=segmentation_head_dim,
+            norm_groups=decoder_norm_groups,
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         input_size = x.shape[-2:]
@@ -84,5 +132,5 @@ class PyramidSegmentationModel(nn.Module):
                 )
             projected.append(feature)
 
-        logits = self.classifier(self.fuse(torch.cat(projected, dim=1)))
-        return F.interpolate(logits, size=input_size, mode="bilinear", align_corners=False)
+        fused = self.fuse(torch.cat(projected, dim=1))
+        return self.segmentation_head(fused, input_size)

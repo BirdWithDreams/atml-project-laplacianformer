@@ -1,6 +1,7 @@
 import lightning as L
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torchmetrics import Metric
 
 from src.models.segmentation import PyramidSegmentationModel
@@ -55,6 +56,98 @@ class SegmentationMetrics(Metric):
         return {"mIoU": mean_iou, "pixel_acc": pixel_acc}
 
 
+class FocalDiceLoss(nn.Module):
+    def __init__(
+            self,
+            num_classes: int,
+            ignore_index: int = 255,
+            focal_gamma: float = 2.0,
+            focal_alpha: float | list[float] | tuple[float, ...] | None = None,
+            focal_weight: float = 1.0,
+            dice_weight: float = 1.0,
+            dice_smooth: float = 1e-5,
+            ):
+        super().__init__()
+        self.num_classes = int(num_classes)
+        self.ignore_index = int(ignore_index)
+        self.focal_gamma = float(focal_gamma)
+        self.focal_alpha_scalar = (
+            float(focal_alpha) if isinstance(focal_alpha, (int, float)) else None
+        )
+        self.focal_weight = float(focal_weight)
+        self.dice_weight = float(dice_weight)
+        self.dice_smooth = float(dice_smooth)
+
+        class_alpha = None
+        if focal_alpha is not None and self.focal_alpha_scalar is None:
+            class_alpha = torch.as_tensor(list(focal_alpha), dtype=torch.float)
+            if class_alpha.numel() != self.num_classes:
+                raise ValueError(
+                    "focal_alpha must be a scalar or provide one weight per class; "
+                    f"got {class_alpha.numel()} weights for {self.num_classes} classes."
+                )
+        self.register_buffer("class_alpha", class_alpha, persistent=False)
+
+    def forward(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        valid = target != self.ignore_index
+        if not valid.any():
+            return logits.sum() * 0.0
+
+        focal_loss = self._focal_loss(logits, target, valid)
+        dice_loss = self._dice_loss(logits, target, valid)
+        return self.focal_weight * focal_loss + self.dice_weight * dice_loss
+
+    def _focal_loss(
+            self,
+            logits: torch.Tensor,
+            target: torch.Tensor,
+            valid: torch.Tensor,
+            ) -> torch.Tensor:
+        ce_loss = F.cross_entropy(
+            logits,
+            target,
+            ignore_index=self.ignore_index,
+            reduction="none",
+        )
+        pt = torch.exp(-ce_loss)
+        focal_loss = (1.0 - pt).pow(self.focal_gamma) * ce_loss
+
+        if self.class_alpha is not None:
+            safe_target = target.clamp(min=0, max=self.num_classes - 1)
+            focal_loss = focal_loss * self.class_alpha.to(logits.device)[safe_target]
+        elif self.focal_alpha_scalar is not None:
+            background_alpha = 1.0 - self.focal_alpha_scalar
+            alpha_t = torch.where(
+                target == 0,
+                target.new_full(target.shape, background_alpha, dtype=logits.dtype),
+                target.new_full(target.shape, self.focal_alpha_scalar, dtype=logits.dtype),
+            )
+            focal_loss = focal_loss * alpha_t
+
+        return focal_loss[valid].mean()
+
+    def _dice_loss(
+            self,
+            logits: torch.Tensor,
+            target: torch.Tensor,
+            valid: torch.Tensor,
+            ) -> torch.Tensor:
+        probs = torch.softmax(logits, dim=1)
+        valid_mask = valid.unsqueeze(1).to(dtype=probs.dtype)
+        safe_target = target.masked_fill(~valid, 0)
+        target_one_hot = F.one_hot(safe_target, num_classes=self.num_classes)
+        target_one_hot = target_one_hot.permute(0, 3, 1, 2).to(dtype=probs.dtype)
+
+        probs = probs * valid_mask
+        target_one_hot = target_one_hot * valid_mask
+
+        reduce_dims = (0, 2, 3)
+        intersection = (probs * target_one_hot).sum(dim=reduce_dims)
+        denominator = probs.sum(dim=reduce_dims) + target_one_hot.sum(dim=reduce_dims)
+        dice = (2.0 * intersection + self.dice_smooth) / (denominator + self.dice_smooth)
+        return 1.0 - dice.mean()
+
+
 class SemanticSegmentationTask(L.LightningModule):
     def __init__(
             self,
@@ -67,6 +160,11 @@ class SemanticSegmentationTask(L.LightningModule):
             log_segmentation_images: bool = True,
             num_log_segmentation_images: int = 4,
             log_segmentation_images_every_n_epochs: int = 1,
+            focal_gamma: float = 2.0,
+            focal_alpha: float | list[float] | tuple[float, ...] | None = None,
+            focal_loss_weight: float = 1.0,
+            dice_loss_weight: float = 1.0,
+            dice_smooth: float = 1e-5,
             ):
         super().__init__()
         self.save_hyperparameters()
@@ -96,9 +194,19 @@ class SemanticSegmentationTask(L.LightningModule):
             rope_base=model_cfg.get("rope_base", 10000.0),
             laplacian_backend=model_cfg.get("laplacian_backend", "cuda"),
             decoder_dim=model_cfg.get("decoder_dim", 128),
+            decoder_norm_groups=model_cfg.get("decoder_norm_groups", 32),
+            segmentation_head_dim=model_cfg.get("segmentation_head_dim", 64),
             dropout=model_cfg.get("dropout", 0.1),
         )
-        self.criterion = nn.CrossEntropyLoss(ignore_index=ignore_index)
+        self.criterion = FocalDiceLoss(
+            num_classes=num_classes,
+            ignore_index=ignore_index,
+            focal_gamma=focal_gamma,
+            focal_alpha=focal_alpha,
+            focal_weight=focal_loss_weight,
+            dice_weight=dice_loss_weight,
+            dice_smooth=dice_smooth,
+        )
         self.val_metrics = SegmentationMetrics(num_classes=num_classes, ignore_index=ignore_index)
         self.test_metrics = SegmentationMetrics(num_classes=num_classes, ignore_index=ignore_index)
         self._segmentation_log_counts = {"val": 0, "test": 0}
