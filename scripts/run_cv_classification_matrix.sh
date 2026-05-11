@@ -30,7 +30,8 @@ DEVICES="${DEVICES:-1}"
 PRECISION="${PRECISION:-16}" # Often better to default to 16 for vision tasks
 WANDB_PROJECT="${WANDB_PROJECT:-cv-model-matrix}"
 COMPILE="${COMPILE:-false}"
-ACCUMULATE_GRAD_BATCHES="${ACCUMULATE_GRAD_BATCHES:-}"
+ACCUMULATE_GRAD_BATCHES="${ACCUMULATE_GRAD_BATCHES:-4}"
+BATCH_SIZE="${BATCH_SIZE:-32}"
 
 # --- Environment Overrides ---
 if [ -n "${MODELS:-}" ]; then read -r -a MODEL_LIST <<< "${MODELS}"; else MODEL_LIST=("${DEFAULT_MODELS[@]}"); fi
@@ -58,14 +59,16 @@ for dataset in "${DATASET_LIST[@]}"; do
   for optimizer in "${OPTIMIZER_LIST[@]}"; do
     for model in "${MODEL_LIST[@]}"; do
       
-      # Determine if we need to sweep Laplacian parameters[cite: 1, 2]
+      # Determine if we need to sweep Laplacian parameters
       if [[ "${model}" == *"laplacian"* ]]; then
         CURRENT_LAMBDAS=("${LAMBDA_LIST[@]}")
         CURRENT_POOLS=("${POOL_LIST[@]}")
+        CURRENT_PRECISION="32" # FORCE 32-BIT FOR LAPLACIAN CUDA KERNELS
       else
         # For vanilla models, run exactly once without lambda/pool sweeps
         CURRENT_LAMBDAS=("N/A")
         CURRENT_POOLS=("N/A")
+        CURRENT_PRECISION="${PRECISION}" # KEEP 16-BIT FOR VANILLA
       fi
 
       for lambd in "${CURRENT_LAMBDAS[@]}"; do
@@ -87,11 +90,12 @@ for dataset in "${DATASET_LIST[@]}"; do
           if ! "${TRAIN_CMD_LIST[@]}" train.py \
             task=cv_classification \
             datamodule="${dataset}" \
+            datamodule.batch_size="${BATCH_SIZE}" \
             "${MODEL_ARGS[@]}" \
             optimizer="${optimizer}" \
             trainer.accelerator="${ACCELERATOR}" \
             trainer.devices="${DEVICES}" \
-            trainer.precision="${PRECISION}" \
+            trainer.precision="${CURRENT_PRECISION}" \
             trainer.compile="${COMPILE}" \
             "${GRAD_ACCUM_ARGS[@]}" \
             logger.project="${WANDB_PROJECT}" \
