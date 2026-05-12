@@ -79,7 +79,7 @@ for dataset in "${DATASET_LIST[@]}"; do
 
           # Append Laplacian args only if applicable
           if [[ "${model}" == *"laplacian"* ]]; then
-            MODEL_ARGS+=("+model.lambda_scale=${lambd}" "++model.pool_ratio=${pool}")
+            MODEL_ARGS+=("++model.lambda_scale=${lambd}" "++model.pool_ratio=${pool}")
             run_name="cv_${dataset}_${model}_L${lambd}_P${pool}_${optimizer}"
           fi
 
