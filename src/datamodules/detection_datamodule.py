@@ -22,9 +22,13 @@ class FakeCOCODataset(Dataset):
     def __getitem__(self, idx):
         img = torch.rand(3, 224, 224)
         num_boxes = torch.randint(1, 5, (1,)).item()
-        boxes = torch.rand(num_boxes, 4)
-        boxes[:, 2:] += boxes[:, :2]
-        boxes = torch.clamp(boxes, 0, 1) * 224
+        x1 = torch.rand(num_boxes) * 100
+        y1 = torch.rand(num_boxes) * 100
+        x2 = x1 + torch.rand(num_boxes) * 100 + 10
+        y2 = y1 + torch.rand(num_boxes) * 100 + 10
+        x2 = torch.clamp(x2, max=224)
+        y2 = torch.clamp(y2, max=224)
+        boxes = torch.stack([x1, y1, x2, y2], dim=1)
         labels = torch.randint(1, self.num_classes, (num_boxes,))
         target = {"boxes": boxes, "labels": labels}
         return img, target

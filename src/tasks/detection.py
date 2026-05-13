@@ -4,8 +4,38 @@ import torch.nn as nn
 from torchvision.models.detection import FasterRCNN
 from torchvision.models.detection.rpn import AnchorGenerator
 from torchvision.ops import box_iou
-from torchvision.models.detection.backbone_utils import BackboneWithFPN
-import torchvision
+from src.models.vision import VisionBackbone, PatchEmbedding, ViTBlock
+
+
+class DetectionBackbone(nn.Module):
+    """
+    ViT backbone that returns a 2D feature map for detection.
+    Uses either vanilla or laplacian attention.
+    """
+    def __init__(self, img_size=224, patch_size=16, dim=384, depth=6, num_heads=6, attn_type="vanilla"):
+        super().__init__()
+        self.patch_embed = PatchEmbedding(img_size, patch_size, 3, dim)
+        self.blocks = nn.ModuleList([
+            ViTBlock(dim, num_heads, attn_type, self.patch_embed.grid_size)
+            for _ in range(depth)
+        ])
+        self.norm = nn.LayerNorm(dim)
+        self.out_channels = dim
+        self.grid_size = self.patch_embed.grid_size
+
+    def forward(self, x):
+        B = x.shape[0]
+        x = self.patch_embed(x)
+        for block in self.blocks:
+            if block.attn_type == "laplacian":
+                x = block(x)
+            else:
+                x = block(x)
+        x = self.norm(x)
+        # reshape to 2D feature map: (B, C, H, W)
+        H = W = self.grid_size
+        x = x.permute(0, 2, 1).reshape(B, -1, H, W)
+        return {"0": x}
 
 
 class ObjectDetectionTask(L.LightningModule):
@@ -20,16 +50,44 @@ class ObjectDetectionTask(L.LightningModule):
         super().__init__()
         self.save_hyperparameters()
 
-        # Use pretrained ResNet backbone for detection
-        # but vary the attention type in a classification head
-        attn_type = model_cfg.get("attn_type", "vanilla") if model_cfg else "vanilla"
-        
-        # Use torchvision's resnet50 backbone with FPN
-        backbone = torchvision.models.detection.fasterrcnn_resnet50_fpn(
-            weights=None,
-            num_classes=num_classes
+        if model_cfg is None:
+            model_cfg = {"attn_type": "vanilla", "dim": 384, "depth": 6, "num_heads": 6}
+
+        backbone = DetectionBackbone(
+            img_size=224,
+            patch_size=16,
+            dim=model_cfg.get("dim", 384),
+            depth=model_cfg.get("depth", 6),
+            num_heads=model_cfg.get("num_heads", 6),
+            attn_type=model_cfg.get("attn_type", "vanilla")
         )
-        self.model = backbone
+
+        anchor_generator = AnchorGenerator(
+            sizes=((32, 64, 128, 256, 512),),
+            aspect_ratios=((0.5, 1.0, 2.0),)
+        )
+
+        roi_pooler = torch.ops.torchvision.ops.MultiScaleRoIAlign(
+            featmap_names=["0"],
+            output_size=7,
+            sampling_ratio=2
+        ) if False else None
+
+        from torchvision.ops import MultiScaleRoIAlign
+        roi_pooler = MultiScaleRoIAlign(
+            featmap_names=["0"],
+            output_size=7,
+            sampling_ratio=2
+        )
+
+        self.model = FasterRCNN(
+            backbone=backbone,
+            num_classes=num_classes,
+            rpn_anchor_generator=anchor_generator,
+            box_roi_pool=roi_pooler,
+            min_size=224,
+            max_size=224
+        )
 
     def forward(self, images, targets=None):
         return self.model(images, targets)
