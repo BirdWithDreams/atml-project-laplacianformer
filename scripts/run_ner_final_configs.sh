@@ -26,7 +26,7 @@ fi
 
 DRY_RUN="${DRY_RUN:-false}"
 SEED="${SEED:-42}"
-WANDB_PROJECT="${WANDB_PROJECT:-ner-final}"
+WANDB_PROJECT="${WANDB_PROJECT:-ner-model-matrix}"
 RUN_PREFIX="${RUN_PREFIX:-final}"
 EXTRA_ARGS=("$@")
 FAILED_RUNS=()
