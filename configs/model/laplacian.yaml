@@ -1,5 +1,0 @@
-name: "laplacian"
-attn_type: "laplacian"
-dim: 384
-depth: 6
-num_heads: 6

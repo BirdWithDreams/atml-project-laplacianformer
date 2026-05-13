@@ -1,4 +1,11 @@
-name: "nlp_classification"
-lr: 2e-5
-weight_decay: 0.01
-optimizer: "AdamW"
+# @package _global_
+defaults:
+  - override /optimizer: adamw_text_scratch
+  - override /model: vanilla_1d_small
+  - override /datamodule: sst2
+
+task:
+  name: "nlp_classification"
+
+trainer:
+  accumulate_grad_batches: 4

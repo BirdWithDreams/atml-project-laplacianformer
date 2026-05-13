@@ -14,21 +14,26 @@ class SeqevalMetric(Metric):
         self.id2label = id2label
         self.metric = evaluate.load("seqeval")
         
-        # State lists
-        self.add_state("predictions", default=[], dist_reduce_fx="cat")
-        self.add_state("references", default=[], dist_reduce_fx="cat")
+        self.add_state("predictions", default=[], dist_reduce_fx=None)
+        self.add_state("references", default=[], dist_reduce_fx=None)
 
     def update(self, preds: torch.Tensor, target: torch.Tensor):
         for k in range(preds.shape[0]):
-            pred = preds[k].cpu().tolist()
-            ref = target[k].cpu().tolist()
+            pred = preds[k].detach().cpu().tolist()
+            ref = target[k].detach().cpu().tolist()
 
-            true_predictions = [
-                self.id2label[p] for (p, l) in zip(pred, ref) if l != -100
-            ]
-            true_labels = [
-                self.id2label[l] for (p, l) in zip(pred, ref) if l != -100
-            ]
+            try:
+                true_predictions = [
+                    self.id2label[p] for (p, l) in zip(pred, ref) if l != -100
+                ]
+                true_labels = [
+                    self.id2label[l] for (p, l) in zip(pred, ref) if l != -100
+                ]
+            except KeyError as exc:
+                raise ValueError(
+                    f"NER label id {exc.args[0]} is missing from id2label. "
+                    "Check that the datamodule label names match num_classes."
+                ) from exc
             
             # Avoid empty sequence issues.
             if len(true_predictions) == 0:
@@ -41,7 +46,7 @@ class SeqevalMetric(Metric):
         if len(self.predictions) == 0:
             return {}
 
-        results = self.metric.compute(predictions=self.predictions, references=self.references)
+        results = self.metric.compute(predictions=self.predictions, references=self.references, zero_division=0)
         
         flat_predictions = [p for preds in self.predictions for p in preds]
         flat_references = [r for refs in self.references for r in refs]
@@ -50,16 +55,16 @@ class SeqevalMetric(Metric):
         token_f1 = f1_score(flat_references, flat_predictions, average="macro", zero_division=0)
 
         final_metrics = {
-            "Entity_Prec": torch.tensor(results["overall_precision"]),
-            "Entity_Rec": torch.tensor(results["overall_recall"]),
-            "Entity_F1": torch.tensor(results["overall_f1"]),
-            "Token_F1": torch.tensor(token_f1)
+            "Entity_Prec": torch.tensor(results["overall_precision"], device=self.device),
+            "Entity_Rec": torch.tensor(results["overall_recall"], device=self.device),
+            "Entity_F1": torch.tensor(results["overall_f1"], device=self.device),
+            "Token_F1": torch.tensor(token_f1, device=self.device)
         }
         
         # Per-entity type secondary metrics
         for key, value in results.items():
             if isinstance(value, dict) and 'f1' in value:
-                final_metrics[f"{key}_F1"] = torch.tensor(value['f1'])
+                final_metrics[f"{key}_F1"] = torch.tensor(value['f1'], device=self.device)
                 
         return final_metrics
 
@@ -76,6 +81,9 @@ class NERTask(L.LightningModule):
             id2label: dict = None
             ):
         super().__init__()
+        self.optimizer = optimizer
+        self.weight_decay = weight_decay
+        self.lr = lr
         self.save_hyperparameters()
 
         # Initialize Backbone via model_cfg
@@ -88,7 +96,12 @@ class NERTask(L.LightningModule):
             dim=model_cfg.get("dim", 384),
             depth=model_cfg.get("depth", 6),
             num_heads=model_cfg.get("num_heads", 6),
-            attn_type=model_cfg.get("attn_type", "vanilla")
+            attn_type=model_cfg.get("attn_type", "vanilla"),
+            lambda_scale=model_cfg.get("lambda_scale", 4.0),
+            pool_ratio=model_cfg.get("pool_ratio", 2),
+            ns_iters=model_cfg.get("ns_iters", 5),
+            laplacian_backend=model_cfg.get("laplacian_backend", "cuda_1d"),
+            dropout=model_cfg.get("dropout", 0.0),
         )
 
         dim = model_cfg.get("dim", 384)
@@ -120,9 +133,11 @@ class NERTask(L.LightningModule):
 
         logits = self(input_ids, attention_mask)
         # Flatten for CrossEntropyLoss
-        loss = self.criterion(logits.view(-1, self.hparams.num_classes), labels.view(-1))
+        loss = self.criterion(logits.reshape(-1, self.hparams.num_classes), labels.reshape(-1))
+        batch_size = input_ids.shape[0]
 
-        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train/loss_step", loss, on_step=True, on_epoch=False, prog_bar=True, batch_size=batch_size)
+        self.log("train/loss_epoch", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=batch_size)
 
         return loss
 
@@ -132,12 +147,13 @@ class NERTask(L.LightningModule):
         labels = batch["labels"]
 
         logits = self(input_ids, attention_mask)
-        loss = self.criterion(logits.view(-1, self.hparams.num_classes), labels.view(-1))
+        loss = self.criterion(logits.reshape(-1, self.hparams.num_classes), labels.reshape(-1))
+        batch_size = input_ids.shape[0]
         
         preds = torch.argmax(logits, dim=-1)
         self.val_metric(preds, labels)
 
-        self.log("val/loss", loss, prog_bar=True)
+        self.log("val/loss", loss, prog_bar=True, batch_size=batch_size)
 
     def on_validation_epoch_end(self):
         metrics = self.val_metric.compute()
@@ -151,12 +167,13 @@ class NERTask(L.LightningModule):
         labels = batch["labels"]
 
         logits = self(input_ids, attention_mask)
-        loss = self.criterion(logits.view(-1, self.hparams.num_classes), labels.view(-1))
+        loss = self.criterion(logits.reshape(-1, self.hparams.num_classes), labels.reshape(-1))
+        batch_size = input_ids.shape[0]
         
         preds = torch.argmax(logits, dim=-1)
         self.test_metric(preds, labels)
         
-        self.log("test/loss", loss)
+        self.log("test/loss", loss, batch_size=batch_size)
 
     def on_test_epoch_end(self):
         metrics = self.test_metric.compute()

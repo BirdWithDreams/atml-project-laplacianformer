@@ -1,17 +1,10 @@
 defaults:
   - _self_
-  - task: cv_classification
-  - model: vanilla
+  - optimizer: adamw_cv_default
+  - trainer: default
+  - logger: wandb
+  - model: vanilla_pvt_small
   - datamodule: cifar100
+  - task: cv_classification
 
 seed: 42
-trainer:
-  max_epochs: 30
-  accelerator: "gpu"
-  devices: 1
-  precision: "bf16-mixed" # <-- Cambiar a bfloat16
-  log_every_n_steps: 10
-
-logger:
-  project: "laplacian-vs-vanilla"
-  name: "${task.name}_${model.name}_${datamodule.name}"

@@ -1,4 +1,11 @@
-name: "ner_task"
-lr: 2e-5
-weight_decay: 0.01
-optimizer: "AdamW"
+# @package _global_
+defaults:
+  - override /optimizer: adamw_text_default
+  - override /model: vanilla_1d_small
+  - override /datamodule: conll2003
+
+task:
+  name: "ner_task"
+
+trainer:
+  accumulate_grad_batches: 1

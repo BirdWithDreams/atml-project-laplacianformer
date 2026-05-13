@@ -1,0 +1,22 @@
+name: "cityscapes_segmentation"
+dataset_name: "cityscapes"
+data_dir: "./data"
+batch_size: 4
+num_workers: 8
+image_size: 320
+train_min_scale: 0.5
+train_max_scale: 2.0
+num_classes: 19
+ignore_index: 255
+download: false
+cityscapes_mode: "fine"
+segmentation_max_iters: 80000
+
+# Expects the 5k high-quality Cityscapes fine annotations under:
+# ./data/cityscapes/leftImg8bit/{train,val}
+# ./data/cityscapes/gtFine/{train,val}
+
+max_train_samples: null
+max_val_samples: null
+max_test_samples: null
+subset_seed: 42

@@ -1,0 +1,24 @@
+# @package _global_
+defaults:
+  - override /task: nlp_classification
+  - override /datamodule: sst2
+  - override /model: vanilla_1d_medium_dropout10
+  - override /optimizer: adamw_text_stable_lr1e_4
+  - override /trainer: default
+
+trainer:
+  max_epochs: 14
+  precision: 32
+  accumulate_grad_batches: 4
+  gradient_clip_val: 1.0
+
+task:
+  name: "nlp_classification"
+  label_smoothing: 0.05
+
+logger:
+  project: "nlp-classification-recommended"
+  name: "nlp_sst2_vanilla_medium_stable"
+  extra_tags:
+    - "recommendation:sst2"
+    - "analysis:lower_lr_regularized"

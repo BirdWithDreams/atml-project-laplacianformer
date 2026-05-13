@@ -1,4 +1,11 @@
-name: "cv_classification"
-lr: 3e-4
-weight_decay: 0.05
-optimizer: "AdamW"
+# @package _global_
+defaults:
+  - override /optimizer: adamw_cv_default
+  - override /model: vanilla_pvt_small
+  - override /datamodule: cifar100
+
+task:
+  name: "cv_classification"
+
+trainer:
+  accumulate_grad_batches: 1

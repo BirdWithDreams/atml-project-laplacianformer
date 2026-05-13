@@ -1,5 +1,15 @@
 name: "sst2"
+model_name: "bert-base-uncased"
 dataset_name: "sst2"
+dataset_path: "glue"
+dataset_config_name: "sst2"
+text_column: "sentence"
+label_column: "label"
+train_split: "train"
+validation_split: "validation"
+test_split: "test"
+validation_size: 0.1
+subset_seed: 42
 batch_size: 32
 num_workers: 4
 max_length: 128

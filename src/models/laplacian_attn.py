@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .rope import apply_2d_rope
+
 
 class NewtonSchulzInverse(nn.Module):
     """
@@ -16,24 +18,42 @@ class NewtonSchulzInverse(nn.Module):
 
     def forward(self, W: torch.Tensor) -> torch.Tensor:
         # W shape: (B, H, m, m)
-        B, H, m, _ = W.shape
-        I = torch.eye(m, device=W.device, dtype=W.dtype).view(1, 1, m, m)
+        orig_dtype = W.dtype
+        device_type = W.device.type
 
-        # Add small diagonal perturbation for strictly positive definite constraint [cite: 246]
-        W_eps = W + self.eps * I
+        # Keep the inverse solve in fp32 even under mixed precision autocast.
+        with torch.amp.autocast(device_type=device_type, enabled=False):
+            W = W.float()
+            B, H, m, _ = W.shape
+            I = torch.eye(m, device=W.device, dtype=W.dtype).view(1, 1, m, m)
 
-        # Initialize scaling factor alpha = 2 / ||W||_2 [cite: 247]
-        # Using Frobenius norm as a differentiable proxy for spectral norm
-        alpha = 2.0 / (torch.linalg.norm(W_eps, dim=(-2, -1), keepdim=True) + 1e-8)
+            # Add small diagonal perturbation for strictly positive definite constraint [cite: 246]
+            W_eps = W + self.eps * I
 
-        # Initialize X_0 = alpha * W^T [cite: 248]
-        X = alpha * W_eps.transpose(-2, -1)
+            # Initialize scaling factor alpha = 2 / ||W||_2 [cite: 247]
+            # Using Frobenius norm as a differentiable proxy for spectral norm
+            alpha = 2.0 / (torch.linalg.norm(W_eps, dim=(-2, -1), keepdim=True) + 1e-8)
 
-        # Iterative update: X_{k+1} = X_k (2I - W X_k) [cite: 252]
-        for _ in range(self.num_iters):
-            X = X @ (2 * I - W_eps @ X)
+            # Initialize X_0 = alpha * W^T [cite: 248]
+            X = alpha * W_eps.transpose(-2, -1)
 
-        return X
+            # Iterative update: X_{k+1} = X_k (2I - W X_k) [cite: 252]
+            for _ in range(self.num_iters):
+                X = X @ (2 * I - W_eps @ X)
+
+            residual = torch.linalg.norm(I - W_eps @ X, dim=(-2, -1))
+            invalid = (
+                ~torch.isfinite(X).all(dim=(-2, -1))
+                | ~torch.isfinite(residual)
+                | (residual > 1.0)
+            )
+
+            if invalid.any():
+                X = X.clone()
+                invalid_w = W_eps[invalid]
+                X[invalid] = torch.linalg.pinv(invalid_w).to(dtype=X.dtype)
+
+        return X.to(orig_dtype)
 
 
 class LaplacianLinearAttention(nn.Module):
@@ -43,9 +63,11 @@ class LaplacianLinearAttention(nn.Module):
 
     def __init__(
             self, dim: int, num_heads: int = 8, lambda_scale: float = 4.0,
-            pool_ratio: int = 2, ns_iters: int = 5
+            pool_ratio: int = 2, ns_iters: int = 5, use_rope: bool = False,
+            rope_base: float = 10000.0
             ):
         super().__init__()
+        assert dim % num_heads == 0, "dim must be divisible by num_heads"
         self.dim = dim
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
@@ -53,6 +75,8 @@ class LaplacianLinearAttention(nn.Module):
         # Paper explicitly sets lambda to 4 as the optimal scale
         self.lambda_scale = lambda_scale
         self.pool_ratio = pool_ratio
+        self.use_rope = use_rope
+        self.rope_base = rope_base
 
         self.qkv = nn.Linear(dim, dim * 3)
         self.proj = nn.Linear(dim, dim)
@@ -85,10 +109,17 @@ class LaplacianLinearAttention(nn.Module):
             W_sp: Spatial width of the feature map
         """
         B, N, C = x.shape
+        if N != H_sp * W_sp:
+            raise ValueError(f"Expected N == H_sp * W_sp, got {N} vs {H_sp} * {W_sp}")
 
         # 1. Generate Q, K, V
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]  # Shapes: (B, H, N, d)
+        if self.use_rope:
+            q = apply_2d_rope(q, H_sp, W_sp, self.rope_base)
+            k = apply_2d_rope(k, H_sp, W_sp, self.rope_base)
+
+        effective_pool = min(self.pool_ratio, H_sp, W_sp)
 
         # 2. Local Context via DWC on V [cite: 226, 228]
         # Reshape V to spatial dimensions, apply DWC, and flatten back
@@ -100,8 +131,8 @@ class LaplacianLinearAttention(nn.Module):
         q_spatial = q.transpose(1, 2).reshape(B, C, H_sp, W_sp)
         k_spatial = k.transpose(1, 2).reshape(B, C, H_sp, W_sp)
 
-        q_pool = F.avg_pool2d(q_spatial, self.pool_ratio, self.pool_ratio)
-        k_pool = F.avg_pool2d(k_spatial, self.pool_ratio, self.pool_ratio)
+        q_pool = F.avg_pool2d(q_spatial, effective_pool, effective_pool)
+        k_pool = F.avg_pool2d(k_spatial, effective_pool, effective_pool)
 
         q_landmark = q_pool.flatten(2).transpose(1, 2).reshape(B, -1, self.num_heads, self.head_dim).transpose(1, 2)
         k_landmark = k_pool.flatten(2).transpose(1, 2).reshape(B, -1, self.num_heads, self.head_dim).transpose(1, 2)
@@ -141,74 +172,6 @@ class LaplacianLinearAttention(nn.Module):
         return output
 
 
-class Laplacian1DLinearAttention(nn.Module):
-    """
-    1D Laplacian attention mechanism for text sequences.
-    """
-    def __init__(
-            self, dim: int, num_heads: int = 8, lambda_scale: float = 4.0,
-            pool_ratio: int = 2, ns_iters: int = 5
-            ):
-        super().__init__()
-        self.dim = dim
-        self.num_heads = num_heads
-        self.head_dim = dim // num_heads
-        self.lambda_scale = lambda_scale
-        self.pool_ratio = pool_ratio
-
-        self.qkv = nn.Linear(dim, dim * 3)
-        self.proj = nn.Linear(dim, dim)
-        self.inverse_solver = NewtonSchulzInverse(num_iters=ns_iters)
-        
-        # Depth-wise convolution 1D for local context
-        self.dwc = nn.Conv1d(dim, dim, kernel_size=3, padding=1, groups=dim)
-        self.white_eps = 1e-5
-
-    def laplacian_kernel(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        diff = x.unsqueeze(-2) - y.unsqueeze(-3)
-        l1_dist = torch.norm(diff, p=1, dim=-1)
-        return torch.exp(-l1_dist / self.lambda_scale)
-
-    def forward(self, x: torch.Tensor, seq_len: int) -> torch.Tensor:
-        B, N, C = x.shape
-
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv[0], qkv[1], qkv[2]
-
-        # Local Context via 1D DWC
-        v_spatial = v.transpose(1, 2).reshape(B, C, seq_len)
-        v_local = self.dwc(v_spatial).transpose(1, 2)
-
-        # Landmark Selection via 1D Pooling
-        q_spatial = q.transpose(1, 2).reshape(B, C, seq_len)
-        k_spatial = k.transpose(1, 2).reshape(B, C, seq_len)
-
-        q_pool = F.avg_pool1d(q_spatial, self.pool_ratio, self.pool_ratio)
-        k_pool = F.avg_pool1d(k_spatial, self.pool_ratio, self.pool_ratio)
-
-        q_landmark = q_pool.transpose(1, 2).reshape(B, -1, self.num_heads, self.head_dim).transpose(1, 2)
-        k_landmark = k_pool.transpose(1, 2).reshape(B, -1, self.num_heads, self.head_dim).transpose(1, 2)
-
-        W = self.laplacian_kernel(q_landmark, k_landmark)
-        W_inv = self.inverse_solver(W)
-
-        C_q = self.laplacian_kernel(q, k_landmark)
-        C_k = self.laplacian_kernel(k, q_landmark)
-
-        mu = C_q.mean(dim=(0, 2), keepdim=True)
-        var = C_q.var(dim=(0, 2), keepdim=True)
-        C_q_norm = (C_q - mu) / torch.sqrt(var + self.white_eps)
-
-        context = torch.matmul(C_k.transpose(-2, -1), v)
-        context = torch.matmul(W_inv, context)
-        global_attn = torch.matmul(C_q_norm, context)
-
-        global_attn = global_attn.transpose(1, 2).reshape(B, N, C)
-        output = self.proj(global_attn + v_local)
-
-        return output
-
-
 # --- Example Usage ---
 if __name__ == "__main__":
     batch_size = 2
@@ -225,11 +188,3 @@ if __name__ == "__main__":
     out = laplacian_attn(x, H_sp, W_sp)
     print(f"2D Input shape:  {x.shape}")
     print(f"2D Output shape: {out.shape}")
-    
-    laplacian_attn_1d = Laplacian1DLinearAttention(
-        dim=dim, num_heads=4, lambda_scale=4.0, pool_ratio=2, ns_iters=5
-    )
-    
-    out_1d = laplacian_attn_1d(x, seq_len)
-    print(f"1D Input shape:  {x.shape}")
-    print(f"1D Output shape: {out_1d.shape}")

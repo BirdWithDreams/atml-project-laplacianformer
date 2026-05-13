@@ -1,112 +1,168 @@
-# Laplacian vs. Vanilla Transformer: An Attention Comparison
- 
-This project serves as a scalable, robust research repository to compare traditional $\mathcal{O}(N^2)$ **Vanilla Softmax Attention** against the $\mathcal{O}(N)$ **Laplacian Linear Attention** mechanism (introduced in the paper *"LaplacianFormer: Rethinking Linear Attention with Laplacian Kernel"*).
+# Laplacianformer Experiments
 
-Standard linear attention models often rely on Gaussian kernels, which can over-suppress mid-range token interactions and lead to vanishing gradients. This repository tests the hypothesis that replacing the Gaussian kernel with a Laplacian kernel ($l_1$ distance) improves gradient flow and token representation while maintaining linear computational complexity.
+This repository supports four Hydra task configs:
 
-The architecture is built on top of **PyTorch Lightning** and **Hydra** for maximum reproducibility, clean code separation, and effortless configuration.
+- `cv_classification`
+- `semantic_segmentation`
+- `nlp_classification`
+- `ner_task`
 
----
+## Environment Setup
 
-## 🏗️ Architecture: What is implemented, where and why?
+Create and activate the project virtual environment, then install the Python
+dependencies and local CUDA extension:
 
-We follow a strict separation of concerns, decoupling the **Backbone** (how tokens attend to each other) from the **Task** (how loss is computed) and the **Data** (what feeds the model).
-
-### 1. Backbones (`src/models/`)
-The backbone's only job is to turn raw sequences or images into rich embeddings. 
-- **`vision.py`**: Contains `VisionBackbone` (a ViT-like architecture). It splits images into patches and returns the `[CLS]` token embedding.
-- **`text.py`**: Contains `TextBackbone`, which embeds standard 1D text token sequences (like BERT). It returns the average pooled sequence embedding.
-- **`vanilla_attn.py` & `laplacian_attn.py`**: Contain the core attention logic. Notably, `laplacian_attn.py` has been expanded to include `Laplacian1DLinearAttention` specifically designed for 1D text sequences.
-
-### 2. Lightning Modules / Tasks (`src/tasks/`)
-Tasks are PyTorch Lightning modules (`LightningModule`). They contain the training loop, optimizer configuration, and metrics logic.
-- **`classification_cv.py`**: Defines `CVClassificationTask`. It initializes a Vision Backbone, creates a Linear Head for classification, utilizes `CrossEntropyLoss`, tracking accuracy, precision, and recall via `torchmetrics`.
-- **`classification_nlp.py`**: Defines `NLPClassificationTask`. Similar to CV, it initializes a Text Backbone and trains the model for text classification.
-
-### 3. Data Modules (`src/datamodules/`)
-These handle downloading, tokenizing, and wrapping datasets in PyTorch DataLoaders.
-- **`cv_datamodule.py`**: Wraps the `torchvision` CIFAR-100 dataset.
-- **`nlp_datamodule.py`**: Uses HuggingFace's `datasets` and `transformers` to automatically download and tokenize the GLUE SST-2 (Sentence Classification) dataset.
-
-### 4. Configuration System (`configs/`)
-Everything is assembled powerfully by **Hydra** using hierarchical YAML files. You do not need to modify Python code to change parameters.
-- `configs/config.yaml`: The entry configuration defining defaults.
-- `configs/model/`: Definitions for model dimensions, attention heads, and depth (`vanilla.yaml`, `laplacian.yaml`).
-- `configs/task/`: Hyperparameters like Learning Rate and Optimizers (`cv_classification.yaml`).
-- `configs/datamodule/`: Batch sizes and dataset configurations (`cifar100.yaml`, `sst2.yaml`).
-
----
-
-## 🚀 Environment Setup 
-
-We use `uv`, an extremely fast Python package resolver to manage dependencies.
-
-**1. Install `uv`:**
-- **Windows (PowerShell):** `irm https://astral.sh/uv/install.ps1 | iex`
-- **macOS/Linux:** `curl -LsSf https://astral.sh/uv/install.sh | sh`
-
-**2. Sync Environment & Install Dependencies:**
-Navigate to the project root and run:
 ```bash
-uv sync
+uv venv .venv --python 3.10
+source ./.venv/bin/activate
+uv pip install -r requirements.txt
+cd ./libs/laplacianformer
+uv pip install -e . --no-build-isolation
+cd ../..
+uv pip install seqeval
 ```
-*This will create the virtual environment and install `transformers`, `lightning`, `hydra-core`, `torchmetrics`, `loguru`, etc. based on `pyproject.toml`.*
 
----
+## Model Matrix
 
-## 🏃‍♂️ Running the Experiments
+Image tasks use only PVT-style backbones with 2D RoPE:
 
-By leveraging Hydra, you can launch entirely different task domains purely via command-line arguments. Logs will seamlessly upload to Weights & Biases (W&B).
+- `vanilla_pvt_small`
+- `vanilla_pvt_medium`
+- `laplacian_pvt_small_cuda`
+- `laplacian_pvt_medium_cuda`
 
-**Run Computer Vision (CIFAR100) with Vanilla Attention:**
+Text tasks use only 1D sequence backbones:
+
+- `vanilla_1d_small`
+- `vanilla_1d_medium`
+- `laplacian_1d_cuda_small`
+- `laplacian_1d_cuda_medium`
+
+The CUDA Laplacian configs do not fall back to torch. Run them with
+`trainer.precision=32`.
+
+## Examples
+
+CV classification:
+
 ```bash
-uv run python train.py task=cv_classification model=vanilla datamodule=cifar100
+uv run train.py task=cv_classification model=vanilla_pvt_small datamodule=cifar100
+uv run train.py task=cv_classification model=laplacian_pvt_small_cuda datamodule=cifar100 trainer.precision=32
 ```
-**Run Computer Vision (CIFAR100) with Laplacian Attention:**
+
+Semantic segmentation:
+
 ```bash
-uv run python train.py task=cv_classification model=laplacian datamodule=cifar100
+uv run train.py task=semantic_segmentation model=vanilla_pvt_small datamodule=voc2012_segmentation
+uv run train.py task=semantic_segmentation model=vanilla_pvt_small datamodule=cityscapes_segmentation
+uv run train.py task=semantic_segmentation model=laplacian_pvt_small_cuda datamodule=voc2012_segmentation trainer.precision=32
 ```
 
-**Run NLP (SST-2 Sentence Classification) with Laplacian Attention:**
+Cityscapes uses the 5k fine-annotation split and expects the downloaded files
+under `./data/cityscapes/leftImg8bit/{train,val}` and
+`./data/cityscapes/gtFine/{train,val}`.
+
+Text classification:
+
 ```bash
-uv run python train.py task=nlp_classification model=laplacian datamodule=sst2
+uv run train.py task=nlp_classification model=vanilla_1d_small datamodule=sst2
+uv run train.py task=nlp_classification model=laplacian_1d_cuda_small datamodule=sst2 trainer.precision=32
+uv run train.py task=nlp_classification_ag_news
 ```
 
-### Advanced Overrides
-Use `+` or `=` to override config nodes. For example, to change batch size, learning rate, and run a fast 1-epoch debug test:
+NER:
+
 ```bash
-uv run python train.py task=cv_classification datamodule.batch_size=64 task.lr=1e-4 trainer.max_epochs=1 +trainer.fast_dev_run=true
+uv run train.py task=ner_task model=vanilla_1d_small datamodule=conll2003
+uv run train.py task=ner_task model=laplacian_1d_cuda_small datamodule=ontonotes5 trainer.precision=32
 ```
 
----
+## Matrix Scripts
 
-## 🛠️ How to Extend for New Tasks
+NER matrix:
 
-The repository is modular. If you want to train on a new Dataset or Task (e.g., Object Detection), follow these steps:
-
-### 1. Add a New DataModule
-Create a new file (e.g. `src/datamodules/my_new_data.py`).
-1. Make your class inherit from `lightning.LightningDataModule`.
-2. Implement `prepare_data()` (download logic) and `setup()` (splitting subsets).
-3. Return PyTorch dataloaders in `train_dataloader()`, `val_dataloader()`, etc.
-4. **Hydra Config:** Create `configs/datamodule/my_new_data.yaml` defining its parameters (batch size, etc).
-
-### 2. Add a New Backbone (Optional)
-If your task requires different feature representations (e.g. audio spectrograms or point clouds), create `src/models/audio.py` that implements `nn.Module`. Make sure it uses `self.attn = MultiHeadAttention()` vs `self.attn = LaplacianLinearAttention()` controlled via an `attn_type` flag.
-
-### 3. Add a New Task (Lightning Module)
-Create a new file (e.g. `src/tasks/detection.py`).
-1. Make your class inherit from `lightning.LightningModule`.
-2. In `__init__`, conditionally instantiate your backbone and define your task head (e.g., bounding box regressor).
-3. Implement `training_step()` calculating loss and logging metrics. Configure your optimizer natively in `configure_optimizers()`.
-4. **Hydra Config:** Create `configs/task/detection.yaml` with learning rates, optimizer variables, and task-specific logic.
-
-### 4. Register in `train.py`
-Open `train.py`. Under `# 1. Setup DataModule` and `# 2. Setup Task & Model`, add simple `if / elif` conditionals checking `cfg.task.name` to instantiate your newest classes!
-
-```python
-# snippet representing addition to train.py
-elif cfg.task.name == "my_new_task":
-    from src.tasks.detection import MyNewTask
-    task = MyNewTask(...)
+```bash
+scripts/run_ner_model_matrix.sh
 ```
+
+Segmentation matrix:
+
+```bash
+scripts/run_segmentation_model_matrix.sh
+```
+
+NLP classification matrix:
+
+```bash
+scripts/run_nlp_classification_model_matrix.sh
+```
+
+## Benchmarking Checkpoints
+
+`benchmark.py` evaluates Lightning checkpoints on a deterministic test subset and
+writes JSONL/CSV summaries with metrics, forward-only inference time, and memory:
+
+```bash
+uv run python benchmark.py \
+  'runs=[{name:ag_news_vanilla,task:nlp_classification,datamodule:ag_news,checkpoint_path:results/path/to/checkpoint.ckpt}]'
+```
+
+For multiple checkpoints, use a glob:
+
+```bash
+uv run python benchmark.py \
+  'runs=[{name:ag_news_matrix,task:nlp_classification,datamodule:ag_news,checkpoint_glob:results/**/last.ckpt}]'
+```
+
+Defaults live in `configs/benchmark/default.yaml`. Common overrides:
+`max_samples=2048`, `warmup_batches=10`, `device=cuda`, and per-run
+`datamodule_overrides={batch_size:32,num_workers:0}`.
+
+A single benchmark config can mix tasks:
+
+```yaml
+runs:
+  - name: cifar100_vanilla
+    task: cv_classification
+    datamodule: cifar100
+    checkpoint_path: results/cifar100.ckpt
+  - name: ag_news_vanilla
+    task: nlp_classification
+    datamodule: ag_news
+    checkpoint_path: results/ag_news.ckpt
+  - name: conll2003_vanilla
+    task: ner_task
+    datamodule: conll2003
+    checkpoint_path: results/conll2003.ckpt
+  - name: voc2012_vanilla
+    task: semantic_segmentation
+    datamodule: voc2012_segmentation
+    checkpoint_path: results/voc2012.ckpt
+```
+
+Or with `screen` (preffered):
+```bash
+LOG="./logs/ner_log_$(date +%Y%m%d_%H%M%S).log" && screen -S ner_run -L -Logfile "$LOG" -dm bash -lc 'cd /workspace/atml-project-laplacianformer && source .venv/bin/activate && bash scripts/run_ner_model_matrix.sh'
+LOG="./logs/ner_log_$(date +%Y%m%d_%H%M%S).log" && screen -S ner_run -L -Logfile "$LOG" -dm bash -lc 'cd /workspace/atml-project-laplacianformer && source .venv/bin/activate && bash scripts/run_ner_gen2_model_matrix.sh --skip 3'
+
+LOG="./logs/seg_log_$(date +%Y%m%d_%H%M%S).log" && screen -S seg_run -L -Logfile "$LOG" -dm bash -lc 'cd /workspace/atml-project-laplacianformer && source .venv/bin/activate && bash scripts/run_segmentation_model_matrix.sh --skip 4'
+LOG="./logs/nlp_log_$(date +%Y%m%d_%H%M%S).log" && screen -S nlp_run -L -Logfile "$LOG" -dm bash -lc 'cd /workspace/atml-project-laplacianformer && source .venv/bin/activate && bash scripts/run_nlp_classification_model_matrix.sh'
+```
+
+Both scripts accept space-separated environment overrides, for example:
+
+```bash
+MODELS="vanilla_pvt_small laplacian_pvt_small_cuda" \
+DATASETS="voc2012_segmentation cityscapes_segmentation" \
+scripts/run_segmentation_model_matrix.sh
+```
+
+## Model Code
+
+`src/models` is intentionally narrow:
+
+- image: `pvt.py`, `rope.py`, `segmentation.py`, 2D Laplacian CUDA wrappers
+- text: `text.py`, `text_ner.py`, `laplacian_1d_attn.py`, 1D Laplacian CUDA wrapper
+- shared attention: `vanilla_attn.py`, `laplacian_attn.py`
+
+The old flat ViT-style vision path and non-task model configs were removed.

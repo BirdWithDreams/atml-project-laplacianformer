@@ -1,0 +1,29 @@
+# @package _global_
+defaults:
+  - override /task: ner_task
+  - override /datamodule: ontonotes5
+  - override /model: vanilla_1d_medium_d8_dropout10
+  - override /optimizer: adam_text_lr7e_5
+  - override /trainer: default
+
+# Final OntoNotes 5 NER config.
+# Vanilla deep-medium is the only family that keeps improving across the long
+# OntoNotes run. Laplacian lambda8/lambda16 remain far below it on Token_F1 and
+# entity-type F1 despite many more steps.
+datamodule:
+  batch_size: 128
+  max_length: 128
+
+trainer:
+  max_epochs: 40
+  precision: 32
+  accumulate_grad_batches: 1
+  gradient_clip_val: 1.0
+
+logger:
+  project: "ner-final"
+  name: "final_ner_ontonotes5_vanilla_deep_medium"
+  extra_tags:
+    - "final:ner"
+    - "dataset:ontonotes5"
+    - "selection:entity_f1_long_run"

@@ -1,0 +1,5 @@
+name: "vanilla_1d_medium_d8"
+attn_type: "vanilla"
+dim: 768
+depth: 8
+num_heads: 12

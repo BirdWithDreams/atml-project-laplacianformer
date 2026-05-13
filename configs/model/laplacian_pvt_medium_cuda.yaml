@@ -1,0 +1,26 @@
+name: "laplacian_pvt_medium_cuda"
+backbone_type: "pvt"
+attn_type: "laplacian"
+laplacian_backend: "cuda"
+img_size: 320
+backbone_checkpoint_path: null
+
+embed_dims: [80, 160, 400, 640]
+depths: [4, 6, 12, 4]
+num_heads: [1, 2, 5, 8]
+mlp_ratios: [8.0, 8.0, 4.0, 4.0]
+patch_sizes: [7, 3, 3, 3]
+strides: [4, 2, 2, 2]
+paddings: [3, 1, 1, 1]
+pool_ratios: [8, 4, 2, 1]
+
+lambda_scale: 4.0
+ns_iters: 5
+use_rope: true
+rope_base: 10000.0
+
+decoder_dim: 256
+decoder_norm_groups: 32
+segmentation_head_dim: 128
+segmentation_head_layers: 2
+dropout: 0.0

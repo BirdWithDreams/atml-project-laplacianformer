@@ -1,0 +1,4 @@
+name: "adam_text_baseline"
+optimizer: "Adam"
+lr: 1e-4
+weight_decay: 0.0

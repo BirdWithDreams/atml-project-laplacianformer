@@ -1,5 +1,0 @@
-name: "vanilla"
-attn_type: "vanilla"
-dim: 384
-depth: 6
-num_heads: 6

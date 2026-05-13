@@ -1,0 +1,4 @@
+name: "adam_text_lr7e_5"
+optimizer: "Adam"
+lr: 7e-5
+weight_decay: 0.0

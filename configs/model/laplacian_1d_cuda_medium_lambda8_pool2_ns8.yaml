@@ -1,0 +1,9 @@
+name: "laplacian_1d_cuda_medium_lambda8_pool2_ns8"
+attn_type: "laplacian"
+laplacian_backend: "cuda_1d"
+dim: 768
+depth: 6
+num_heads: 12
+lambda_scale: 8.0
+pool_ratio: 2
+ns_iters: 8

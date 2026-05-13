@@ -1,0 +1,5 @@
+name: "vanilla_1d_small"
+attn_type: "vanilla"
+dim: 512
+depth: 6
+num_heads: 8
