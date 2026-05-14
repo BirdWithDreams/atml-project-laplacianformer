@@ -123,6 +123,7 @@ def main(cfg: DictConfig):
     if cfg.task.name == "cv_classification":
         from src.datamodules.cv_datamodule import CVDataModule
         datamodule = CVDataModule(
+            data_dir=cfg.datamodule.get("data_dir", "./data"),
             dataset_name=cfg.datamodule.dataset_name,
             batch_size=cfg.datamodule.batch_size,
             num_workers=cfg.datamodule.num_workers,

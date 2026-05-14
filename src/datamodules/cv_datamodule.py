@@ -5,6 +5,17 @@ import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 import os
 
+
+def _split_dir(root_dir: str, split_names: tuple[str, ...]) -> str:
+    for split_name in split_names:
+        candidate = os.path.join(root_dir, split_name)
+        if os.path.isdir(candidate):
+            return candidate
+
+    expected = ", ".join(os.path.join(root_dir, split_name) for split_name in split_names)
+    raise FileNotFoundError(f"Could not find dataset split directory. Expected one of: {expected}")
+
+
 class CVDataModule(L.LightningDataModule):
     def __init__(
             self, data_dir: str = "./data", dataset_name: str = "cifar100", batch_size: int = 128,
@@ -44,17 +55,21 @@ class CVDataModule(L.LightningDataModule):
             test_dataset = torchvision.datasets.CIFAR100(self.data_dir, train=False, transform=self.transform_test)
             
         elif self.dataset_name == "imagenet":
-            # Asume que la data está en ./data/imagenet/train y ./data/imagenet/val
-            train_dir = os.path.join(self.data_dir, "imagenet", "train")
-            val_dir = os.path.join(self.data_dir, "imagenet", "val")
+            imagenet_root = os.path.join(self.data_dir, "imagenet")
+            if not os.path.isdir(imagenet_root) and os.path.isdir(os.path.join(self.data_dir, "train")):
+                imagenet_root = self.data_dir
+
+            train_dir = _split_dir(imagenet_root, ("train",))
+            val_dir = _split_dir(imagenet_root, ("val", "validation"))
             train_dataset = torchvision.datasets.ImageFolder(train_dir, transform=self.transform_train)
             val_dataset = torchvision.datasets.ImageFolder(val_dir, transform=self.transform_test)
             test_dataset = val_dataset  # Típicamente en ImageNet usamos val para test
             
         else:
             # Opción por defecto (Genérica) para cualquier dataset organizado en carpetas
-            train_dir = os.path.join(self.data_dir, self.dataset_name, "train")
-            val_dir = os.path.join(self.data_dir, self.dataset_name, "val")
+            dataset_root = os.path.join(self.data_dir, self.dataset_name)
+            train_dir = _split_dir(dataset_root, ("train",))
+            val_dir = _split_dir(dataset_root, ("val", "validation"))
             train_dataset = torchvision.datasets.ImageFolder(train_dir, transform=self.transform_train)
             val_dataset = torchvision.datasets.ImageFolder(val_dir, transform=self.transform_test)
             test_dataset = val_dataset
