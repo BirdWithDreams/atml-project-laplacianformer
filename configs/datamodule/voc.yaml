@@ -1,5 +1,5 @@
 name: "voc"
-dataset_name: "coco"
+dataset_name: "voc"
 batch_size: 4
 num_workers: 4
-num_classes: 91
+num_classes: 21

@@ -4,44 +4,29 @@ import torch.nn as nn
 from torchvision.models.detection import FasterRCNN
 from torchvision.models.detection.rpn import AnchorGenerator
 from torchvision.ops import box_iou
-from src.models.vision import VisionBackbone, PatchEmbedding, ViTBlock
+from src.models.vision import VisionBackbone
 
 
-class DetectionBackbone(nn.Module):
-    """
-    ViT backbone that returns a 2D feature map for detection.
-    Uses either vanilla or laplacian attention.
-    """
-    def __init__(self, img_size=224, patch_size=16, dim=384, depth=6, num_heads=6, attn_type="vanilla"):
+class DetectionBackboneWrapper(nn.Module):
+    def __init__(self, backbone):
         super().__init__()
-        self.patch_embed = PatchEmbedding(img_size, patch_size, 3, dim)
-        self.blocks = nn.ModuleList([
-            ViTBlock(dim, num_heads, attn_type, self.patch_embed.grid_size)
-            for _ in range(depth)
-        ])
-        self.norm = nn.LayerNorm(dim)
-        self.out_channels = dim
-        self.grid_size = self.patch_embed.grid_size
+        self.backbone = backbone
+        self.out_channels = backbone.dim
 
     def forward(self, x):
-        B = x.shape[0]
-        x = self.patch_embed(x)
-        for block in self.blocks:
-            if block.attn_type == "laplacian":
-                x = block(x)
-            else:
-                x = block(x)
-        x = self.norm(x)
-        # reshape to 2D feature map: (B, C, H, W)
-        H = W = self.grid_size
-        x = x.permute(0, 2, 1).reshape(B, -1, H, W)
-        return {"0": x}
+        features = self.backbone.patch_embed(x)
+        for block in self.backbone.blocks:
+            features = block(features)
+        B, N, C = features.shape
+        H = W = int(N ** 0.5)
+        features = features.permute(0, 2, 1).reshape(B, C, H, W)
+        return {"0": features}
 
 
 class ObjectDetectionTask(L.LightningModule):
     def __init__(
             self,
-            num_classes: int = 91,
+            num_classes: int = 21,
             lr: float = 1e-4,
             weight_decay: float = 0.0005,
             optimizer: str = "AdamW",
@@ -53,7 +38,7 @@ class ObjectDetectionTask(L.LightningModule):
         if model_cfg is None:
             model_cfg = {"attn_type": "vanilla", "dim": 384, "depth": 6, "num_heads": 6}
 
-        backbone = DetectionBackbone(
+        vision_backbone = VisionBackbone(
             img_size=224,
             patch_size=16,
             dim=model_cfg.get("dim", 384),
@@ -62,31 +47,17 @@ class ObjectDetectionTask(L.LightningModule):
             attn_type=model_cfg.get("attn_type", "vanilla")
         )
 
+        wrapped_backbone = DetectionBackboneWrapper(vision_backbone)
+
         anchor_generator = AnchorGenerator(
             sizes=((32, 64, 128, 256, 512),),
             aspect_ratios=((0.5, 1.0, 2.0),)
         )
 
-        roi_pooler = torch.ops.torchvision.ops.MultiScaleRoIAlign(
-            featmap_names=["0"],
-            output_size=7,
-            sampling_ratio=2
-        ) if False else None
-
-        from torchvision.ops import MultiScaleRoIAlign
-        roi_pooler = MultiScaleRoIAlign(
-            featmap_names=["0"],
-            output_size=7,
-            sampling_ratio=2
-        )
-
         self.model = FasterRCNN(
-            backbone=backbone,
+            backbone=wrapped_backbone,
             num_classes=num_classes,
             rpn_anchor_generator=anchor_generator,
-            box_roi_pool=roi_pooler,
-            min_size=224,
-            max_size=224
         )
 
     def forward(self, images, targets=None):
