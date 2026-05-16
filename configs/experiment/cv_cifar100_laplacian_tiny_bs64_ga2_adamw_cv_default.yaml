@@ -1,0 +1,30 @@
+# @package _global_
+defaults:
+  - override /task: cv_classification
+  - override /datamodule: cifar100
+  - override /model: laplacian_pvt_tiny_cuda
+  - override /optimizer: adamw_cv_default
+  - override /trainer: default
+
+seed: 42
+
+datamodule:
+  batch_size: 64
+  image_size: 224
+  num_classes: 100
+  num_workers: 4
+
+trainer:
+  max_epochs: 100
+  precision: 32
+  accumulate_grad_batches: 2
+  accelerator: "gpu"
+  devices: 1
+  compile: false
+  log_every_n_steps: 10
+
+logger:
+  project: "cv-classification-model-matrix"
+  name: "cv_cifar100_laplacian_pvt_tiny_cuda_adamw_cv_default"
+  extra_tags:
+    - "long_run"

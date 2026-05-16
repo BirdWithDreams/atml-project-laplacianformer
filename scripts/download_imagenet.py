@@ -243,7 +243,7 @@ def main() -> None:
     parser.add_argument(
         "--train-images-per-class",
         type=int,
-        default=100,
+        default=200,
     )
     parser.add_argument(
         "--val-images-per-class",

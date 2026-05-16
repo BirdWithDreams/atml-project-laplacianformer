@@ -1,4 +1,4 @@
-name: "laplacian_pvt_small_cuda"
+name: "laplacian_pvt_tiny_cuda"
 backbone_type: "pvt"
 attn_type: "laplacian"
 laplacian_backend: "cuda"
@@ -6,7 +6,7 @@ img_size: 224
 backbone_checkpoint_path: null
 
 embed_dims: [64, 128, 320, 512]
-depths: [4, 6, 12, 4]
+depths: [2, 2, 2, 2]
 num_heads: [1, 2, 5, 8]
 mlp_ratios: [8.0, 8.0, 4.0, 4.0]
 patch_sizes: [7, 3, 3, 3]

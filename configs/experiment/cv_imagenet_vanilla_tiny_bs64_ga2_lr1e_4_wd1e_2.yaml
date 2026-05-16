@@ -1,0 +1,26 @@
+# @package _global_
+defaults:
+  - override /task: cv_classification
+  - override /datamodule: imagenet
+  - override /model: vanilla_pvt_tiny
+  - override /optimizer: adamw_cv_vanilla_lr1e_4_wd1e_2
+  - override /trainer: default
+
+datamodule:
+  batch_size: 64
+
+trainer:
+  max_epochs: 100
+  precision: 32
+  accumulate_grad_batches: 2
+
+logger:
+  project: "cv-classification-bs64-ga2"
+  name: "cv_imagenet_vanilla_tiny_bs64_ga2_lr1e_4_wd1e_2"
+  extra_tags:
+    - "cv"
+    - "dataset:imagenet"
+    - "model_type:vanilla"
+    - "batch_size:64"
+    - "grad_accum:2"
+    - "epochs:100"

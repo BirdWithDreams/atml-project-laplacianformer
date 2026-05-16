@@ -1,0 +1,6 @@
+name: "adamw_cv_laplacian_lr4e_4_wd1e_2"
+optimizer: "AdamW"
+lr: 4e-4
+weight_decay: 0.01
+scheduler: "warmup_cosine"
+warmup_epochs: 5

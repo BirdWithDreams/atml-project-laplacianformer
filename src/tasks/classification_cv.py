@@ -1,3 +1,5 @@
+import math
+
 import lightning as L
 import torch
 import torch.nn as nn
@@ -11,6 +13,8 @@ class CVClassificationTask(L.LightningModule):
             lr: float = 3e-4,
             weight_decay: float = 0.05,
             optimizer: str = "AdamW",
+            scheduler: str = "warmup_cosine",
+            warmup_epochs: int = 0,
             model_cfg: dict = None
             ):
         super().__init__()
@@ -51,12 +55,27 @@ class CVClassificationTask(L.LightningModule):
         self.val_prec = MulticlassPrecision(num_classes=num_classes, average="macro")
         self.val_rec = MulticlassRecall(num_classes=num_classes, average="macro")
 
+    def _validate_targets(self, targets: torch.Tensor):
+        if targets.numel() == 0:
+            return
+
+        min_target = int(targets.detach().min().item())
+        max_target = int(targets.detach().max().item())
+        num_classes = int(self.hparams.num_classes)
+        if min_target < 0 or max_target >= num_classes:
+            raise ValueError(
+                "CV classification target labels are outside the configured class range: "
+                f"min={min_target}, max={max_target}, num_classes={num_classes}. "
+                "Check datamodule.num_classes against the dataset class folders."
+            )
+
     def forward(self, x):
         features = self.backbone(x)
         return self.head(features)
 
     def training_step(self, batch, batch_idx):
         x, y = batch
+        self._validate_targets(y)
         logits = self(x)
         loss = self.criterion(logits, y)
         batch_size = x.shape[0]
@@ -72,6 +91,7 @@ class CVClassificationTask(L.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
+        self._validate_targets(y)
         logits = self(x)
         loss = self.criterion(logits, y)
         batch_size = x.shape[0]
@@ -87,6 +107,7 @@ class CVClassificationTask(L.LightningModule):
 
     def test_step(self, batch, batch_idx):
         x, y = batch
+        self._validate_targets(y)
         logits = self(x)
         loss = self.criterion(logits, y)
         self.log("test/loss", loss, batch_size=x.shape[0])
@@ -98,8 +119,44 @@ class CVClassificationTask(L.LightningModule):
             )
         else:
             optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
-            
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=self.trainer.max_epochs)
+
+        scheduler_name = str(self.hparams.scheduler).lower()
+        if scheduler_name in {"none", "null", "false"}:
+            return optimizer
+
+        max_epochs = int(self.trainer.max_epochs)
+        if max_epochs <= 0:
+            raise ValueError(
+                "CV classification schedulers require trainer.max_epochs > 0, "
+                f"got {max_epochs}."
+            )
+
+        warmup_epochs = int(self.hparams.warmup_epochs)
+        if warmup_epochs < 0:
+            raise ValueError(f"warmup_epochs must be non-negative, got {warmup_epochs}.")
+        if warmup_epochs >= max_epochs:
+            raise ValueError(
+                "warmup_epochs must be smaller than trainer.max_epochs; "
+                f"got warmup_epochs={warmup_epochs}, max_epochs={max_epochs}."
+            )
+
+        if scheduler_name in {"cosine", "warmup_cosine"}:
+            def lr_lambda(current_epoch: int) -> float:
+                current_epoch = max(int(current_epoch), 0)
+                if warmup_epochs > 0 and current_epoch < warmup_epochs:
+                    return float(current_epoch + 1) / float(warmup_epochs)
+
+                decay_epochs = max(max_epochs - warmup_epochs, 1)
+                decay_epoch = min(max(current_epoch - warmup_epochs, 0), decay_epochs)
+                decay_progress = float(decay_epoch) / float(decay_epochs)
+                return 0.5 * (1.0 + math.cos(math.pi * decay_progress))
+
+            scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+        else:
+            raise ValueError(
+                "CVClassificationTask supports scheduler='warmup_cosine', "
+                f"scheduler='cosine', or scheduler='none'; got {self.hparams.scheduler!r}."
+            )
         
         return {
             "optimizer": optimizer,

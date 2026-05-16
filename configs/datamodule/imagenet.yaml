@@ -1,6 +1,6 @@
 name: "imagenet"
 dataset_name: "imagenet"
-batch_size: 32
+batch_size: 64
 num_workers: 8   
 image_size: 224
-num_classes: 10
+num_classes: 100

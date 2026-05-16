@@ -2,7 +2,7 @@ name: "laplacian_pvt_medium_cuda"
 backbone_type: "pvt"
 attn_type: "laplacian"
 laplacian_backend: "cuda"
-img_size: 320
+img_size: 224
 backbone_checkpoint_path: null
 
 embed_dims: [80, 160, 400, 640]
