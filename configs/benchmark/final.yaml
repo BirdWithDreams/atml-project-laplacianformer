@@ -1,0 +1,39 @@
+defaults:
+  - default
+  - _self_
+
+runs:
+  - name: cv_cifar100_final
+    task: cv_classification
+    datamodule: cifar100
+    checkpoint_glob: "results/cv-classification-final/*cifar100*/*/checkpoints/last.ckpt"
+
+  - name: cv_imagenet_final
+    task: cv_classification
+    datamodule: imagenet
+    checkpoint_glob: "results/cv-classification-final/*imagenet*/*/checkpoints/last.ckpt"
+
+  - name: ner_conll2003_final
+    task: ner_task
+    datamodule: conll2003
+    checkpoint_glob: "results/ner-final/*conll2003*/*/checkpoints/last.ckpt"
+
+  - name: ner_ontonotes5_final
+    task: ner_task
+    datamodule: ontonotes5
+    checkpoint_glob: "results/ner-final/*ontonotes5*/*/checkpoints/last.ckpt"
+
+  - name: nlp_sst2_final
+    task: nlp_classification
+    datamodule: sst2
+    checkpoint_glob: "results/nlp-classification-final/stability_sst2_*/*/checkpoints/last.ckpt"
+
+  - name: nlp_ag_news_final
+    task: nlp_classification
+    datamodule: ag_news
+    checkpoint_glob: "results/nlp-classification-final/stability_ag_news_*/*/checkpoints/last.ckpt"
+
+  - name: segmentation_stanford_background_final
+    task: semantic_segmentation
+    datamodule: stanford_background_segmentation
+    checkpoint_glob: "results/segmentation-final/*/*/checkpoints/last.ckpt"

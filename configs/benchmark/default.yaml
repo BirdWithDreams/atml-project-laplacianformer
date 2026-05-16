@@ -20,6 +20,7 @@ output_csv: "benchmark_results.csv"
 # - task: cv_classification | nlp_classification | ner_task | semantic_segmentation
 # - datamodule: one config from configs/datamodule
 # - checkpoint_path, checkpoint_paths, or checkpoint_glob
+# You can also pass a named preset, for example: runs=final
 #
 # Optional per-run overrides:
 # - datamodule_overrides: {batch_size: 32, num_workers: 0}

@@ -47,6 +47,35 @@ def to_plain_container(value: Any) -> Any:
     return value
 
 
+def load_runs_config(runs_cfg: Any) -> list[Any] | ListConfig:
+    if runs_cfg is None:
+        return []
+    if isinstance(runs_cfg, str):
+        candidate_paths = [
+            CONFIG_ROOT / "benchmark" / f"{runs_cfg}.yaml",
+            CONFIG_ROOT / "benchmark" / "runs" / f"{runs_cfg}.yaml",
+        ]
+        preset_path = next((path for path in candidate_paths if path.is_file()), None)
+        if preset_path is None:
+            searched = ", ".join(str(path) for path in candidate_paths)
+            raise FileNotFoundError(
+                f"Unknown benchmark runs preset '{runs_cfg}'. Expected one of: {searched}"
+            )
+
+        preset_cfg = OmegaConf.load(preset_path)
+        if isinstance(preset_cfg, DictConfig):
+            if preset_cfg.get("runs") is None:
+                raise ValueError(f"Benchmark runs preset '{preset_path}' must define a runs list.")
+            return preset_cfg.runs
+        if isinstance(preset_cfg, ListConfig):
+            return preset_cfg
+        raise TypeError(f"Benchmark runs preset '{preset_path}' must be a list or define runs.")
+
+    if isinstance(runs_cfg, (list, ListConfig)):
+        return runs_cfg
+    raise TypeError("Benchmark runs must be a list or a named preset string.")
+
+
 def expand_checkpoint_paths(run_cfg: DictConfig) -> list[Path]:
     if run_cfg.get("checkpoint_glob") is not None:
         pattern = str(run_cfg.checkpoint_glob)
@@ -72,7 +101,11 @@ def expand_checkpoint_paths(run_cfg: DictConfig) -> list[Path]:
 
 def expand_runs(cfg: DictConfig) -> list[DictConfig]:
     expanded = []
-    for run_cfg in cfg.get("runs", []):
+    for run_cfg in load_runs_config(cfg.get("runs", [])):
+        if not isinstance(run_cfg, DictConfig):
+            run_cfg = OmegaConf.create(run_cfg)
+        if not isinstance(run_cfg, DictConfig):
+            raise TypeError("Each benchmark run must be a mapping.")
         paths = expand_checkpoint_paths(run_cfg)
         for index, checkpoint_path in enumerate(paths):
             run = OmegaConf.create(to_plain_container(run_cfg))
@@ -179,17 +212,29 @@ def load_task(task_name: str, checkpoint_path: Path):
     if task_name == "cv_classification":
         from src.tasks.classification_cv import CVClassificationTask
 
-        return CVClassificationTask.load_from_checkpoint(str(checkpoint_path), map_location="cpu")
+        return CVClassificationTask.load_from_checkpoint(
+            str(checkpoint_path),
+            map_location="cpu",
+            weights_only=False,
+        )
 
     if task_name == "nlp_classification":
         from src.tasks.classification_nlp import NLPClassificationTask
 
-        return NLPClassificationTask.load_from_checkpoint(str(checkpoint_path), map_location="cpu")
+        return NLPClassificationTask.load_from_checkpoint(
+            str(checkpoint_path),
+            map_location="cpu",
+            weights_only=False,
+        )
 
     if task_name == "ner_task":
         from src.tasks.ner_task import NERTask
 
-        return NERTask.load_from_checkpoint(str(checkpoint_path), map_location="cpu")
+        return NERTask.load_from_checkpoint(
+            str(checkpoint_path),
+            map_location="cpu",
+            weights_only=False,
+        )
 
     if task_name == "semantic_segmentation":
         from src.tasks.segmentation import SemanticSegmentationTask
@@ -197,24 +242,19 @@ def load_task(task_name: str, checkpoint_path: Path):
         return SemanticSegmentationTask.load_from_checkpoint(
             str(checkpoint_path),
             map_location="cpu",
+            weights_only=False,
             log_segmentation_images=False,
         )
 
     raise ValueError(f"Unsupported task for benchmarking: {task_name}")
 
 
-def setup_test_dataloader(datamodule, max_samples: int | None, subset_seed: int, subset_shuffle: bool):
-    datamodule.prepare_data()
-    datamodule.setup("test")
-    if not getattr(datamodule, "has_test_labels", True):
-        raise ValueError("Configured test split has no public labels.")
-
-    test_dataset = getattr(datamodule, "test_dataset", None)
-    test_data = getattr(datamodule, "test_data", None)
-    if test_dataset is None and test_data is None:
-        raise ValueError("Datamodule did not create a test dataset.")
-
-    dataloader = datamodule.test_dataloader()
+def subset_dataloader(
+        dataloader,
+        max_samples: int | None,
+        subset_seed: int,
+        subset_shuffle: bool,
+        ) -> DataLoader:
     if max_samples is None:
         return dataloader
 
@@ -241,6 +281,35 @@ def setup_test_dataloader(datamodule, max_samples: int | None, subset_seed: int,
     if dataloader.num_workers > 0:
         loader_kwargs["persistent_workers"] = getattr(dataloader, "persistent_workers", False)
     return DataLoader(subset, **loader_kwargs)
+
+
+def setup_eval_dataloader(
+        datamodule,
+        max_samples: int | None,
+        subset_seed: int,
+        subset_shuffle: bool,
+        ) -> tuple[DataLoader, str]:
+    datamodule.prepare_data()
+    datamodule.setup("test")
+
+    has_public_test_labels = bool(getattr(datamodule, "has_test_labels", True))
+    test_dataset = getattr(datamodule, "test_dataset", None)
+    test_data = getattr(datamodule, "test_data", None)
+    if has_public_test_labels and (test_dataset is not None or test_data is not None):
+        dataloader = datamodule.test_dataloader()
+        return subset_dataloader(dataloader, max_samples, subset_seed, subset_shuffle), "test"
+
+    datamodule.setup("fit")
+    val_dataset = getattr(datamodule, "val_dataset", None)
+    val_data = getattr(datamodule, "val_data", None)
+    if val_dataset is None and val_data is None:
+        raise ValueError(
+            "Configured test split has no public labels and datamodule did not create "
+            "a validation dataset."
+        )
+
+    dataloader = datamodule.val_dataloader()
+    return subset_dataloader(dataloader, max_samples, subset_seed, subset_shuffle), "validation"
 
 
 def select_device(device_cfg: str) -> torch.device:
@@ -525,7 +594,12 @@ def benchmark_run(
     subset_shuffle = bool(run_cfg.get("subset_shuffle", cfg.get("subset_shuffle", True)))
 
     datamodule = build_datamodule(task_name, datamodule_cfg, hparams)
-    dataloader = setup_test_dataloader(datamodule, max_samples, subset_seed, subset_shuffle)
+    dataloader, eval_split = setup_eval_dataloader(
+        datamodule,
+        max_samples,
+        subset_seed,
+        subset_shuffle,
+    )
 
     model = load_task(task_name, checkpoint_path)
     model.to(device)
@@ -576,6 +650,7 @@ def benchmark_run(
         "task": task_name,
         "checkpoint_path": str(checkpoint_path),
         "datamodule": to_plain_container(datamodule_cfg),
+        "eval_split": eval_split,
         "device": str(device),
         "precision": str(precision),
         "num_samples": total_samples,
@@ -599,6 +674,7 @@ def flatten_result(result: dict[str, Any]) -> dict[str, Any]:
         "name": result.get("name"),
         "task": result.get("task"),
         "checkpoint_path": result.get("checkpoint_path"),
+        "eval_split": result.get("eval_split"),
         "device": result.get("device"),
         "precision": result.get("precision"),
         "num_samples": result.get("num_samples"),
