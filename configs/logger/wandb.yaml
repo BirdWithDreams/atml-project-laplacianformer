@@ -1,7 +1,7 @@
 project: "laplacian-vs-vanilla"
-entity: "anmero-espol"
+entity: "birdwithdreams"
 name: "${task.name}_${model.name}_${datamodule.name}_${optimizer.name}"
-extra_tags: []
+extra_tags: ["long_run"]
 save_dir: "./results"
 
 checkpoint_dir: null

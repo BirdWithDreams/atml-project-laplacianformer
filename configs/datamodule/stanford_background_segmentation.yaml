@@ -1,0 +1,19 @@
+name: "stanford_background_segmentation"
+dataset_name: "stanford_background"
+data_dir: "./data/stanford-background-dataset"
+batch_size: 8
+num_workers: 4
+image_size: 320
+train_min_scale: 0.75
+train_max_scale: 1.5
+num_classes: 9
+ignore_index: 255
+download: true
+val_fraction: 0.1
+test_fraction: 0.1
+segmentation_max_iters: 2000
+
+max_train_samples: null
+max_val_samples: null
+max_test_samples: null
+subset_seed: 42

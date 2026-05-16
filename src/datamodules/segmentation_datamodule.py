@@ -9,6 +9,7 @@ import torchvision
 import torchvision.transforms.functional as TF
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset, Subset
+from torchvision.datasets.utils import download_and_extract_archive
 from torchvision.transforms import InterpolationMode
 
 
@@ -168,6 +169,154 @@ class CityscapesSegmentationWrapper(Dataset):
         return self.transform(image, mask)
 
 
+class StanfordBackgroundSegmentation(Dataset):
+    url = "http://dags.stanford.edu/data/iccv09Data.tar.gz"
+    filename = "iccv09Data.tar.gz"
+
+    def __init__(
+            self,
+            root: str,
+            split: str,
+            transform: SegmentationTransform,
+            val_fraction: float = 0.1,
+            test_fraction: float = 0.1,
+            subset_seed: int = 42,
+            download: bool = False,
+            ):
+        self.root = root
+        self.split = split
+        self.transform = transform
+        if download:
+            self.download()
+
+        self.data_root = self._find_data_root(root)
+        self.image_dir = os.path.join(self.data_root, "images")
+        self.label_dir = os.path.join(self.data_root, "labels")
+        self.samples = self._split_samples(
+            self._discover_samples(),
+            split=split,
+            val_fraction=val_fraction,
+            test_fraction=test_fraction,
+            subset_seed=subset_seed,
+        )
+
+    def download(self):
+        if self._has_data(self.root):
+            return
+
+        os.makedirs(self.root, exist_ok=True)
+        download_and_extract_archive(
+            self.url,
+            download_root=self.root,
+            filename=self.filename,
+        )
+
+    @staticmethod
+    def _has_data(root: str) -> bool:
+        candidate_roots = [root, os.path.join(root, "iccv09Data")]
+        return any(
+            os.path.isdir(os.path.join(candidate_root, "images"))
+            and os.path.isdir(os.path.join(candidate_root, "labels"))
+            for candidate_root in candidate_roots
+        )
+
+    @classmethod
+    def _find_data_root(cls, root: str) -> str:
+        candidate_roots = [root, os.path.join(root, "iccv09Data")]
+        for candidate_root in candidate_roots:
+            if (
+                os.path.isdir(os.path.join(candidate_root, "images"))
+                and os.path.isdir(os.path.join(candidate_root, "labels"))
+            ):
+                return candidate_root
+
+        raise FileNotFoundError(
+            "Could not find Stanford Background data. Expected images/ and labels/ "
+            f"under {root!r} or {os.path.join(root, 'iccv09Data')!r}. "
+            "Set download=true to fetch iccv09Data.tar.gz."
+        )
+
+    def _discover_samples(self) -> list[tuple[str, str]]:
+        image_paths = []
+        for filename in sorted(os.listdir(self.image_dir)):
+            stem, extension = os.path.splitext(filename)
+            if extension.lower() not in {".jpg", ".jpeg", ".png"}:
+                continue
+
+            label_path = self._find_label_path(stem)
+            if label_path is not None:
+                image_paths.append((os.path.join(self.image_dir, filename), label_path))
+
+        if not image_paths:
+            raise FileNotFoundError(
+                "No Stanford Background image/label pairs found under "
+                f"{self.image_dir!r} and {self.label_dir!r}."
+            )
+
+        return image_paths
+
+    def _find_label_path(self, stem: str) -> Optional[str]:
+        for suffix in (".regions.txt", ".png", ".jpg", ".jpeg"):
+            candidate = os.path.join(self.label_dir, f"{stem}{suffix}")
+            if os.path.exists(candidate):
+                return candidate
+        return None
+
+    @staticmethod
+    def _split_samples(
+            samples: list[tuple[str, str]],
+            split: str,
+            val_fraction: float,
+            test_fraction: float,
+            subset_seed: int,
+            ) -> list[tuple[str, str]]:
+        if split not in {"train", "val", "test"}:
+            raise ValueError(f"Unknown Stanford Background split: {split!r}")
+
+        if val_fraction < 0 or test_fraction < 0 or val_fraction + test_fraction >= 1:
+            raise ValueError(
+                "Stanford Background split fractions must be non-negative and sum to < 1; "
+                f"got val_fraction={val_fraction}, test_fraction={test_fraction}."
+            )
+
+        rng = random.Random(subset_seed)
+        shuffled = list(samples)
+        rng.shuffle(shuffled)
+
+        total = len(shuffled)
+        test_count = int(round(total * test_fraction))
+        val_count = int(round(total * val_fraction))
+        train_end = total - val_count - test_count
+        val_end = train_end + val_count
+
+        if split == "train":
+            return shuffled[:train_end]
+        if split == "val":
+            return shuffled[train_end:val_end]
+        return shuffled[val_end:]
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+        image_path, label_path = self.samples[index]
+        image = Image.open(image_path)
+        mask = self._load_mask(label_path)
+        return self.transform(image, mask)
+
+    @staticmethod
+    def _load_mask(label_path: str) -> Image.Image:
+        if label_path.endswith(".regions.txt"):
+            mask_array = np.loadtxt(label_path, dtype=np.int64)
+            return Image.fromarray(mask_array.astype(np.uint8))
+
+        mask = Image.open(label_path)
+        mask_array = np.array(mask)
+        if mask_array.ndim == 3:
+            mask_array = mask_array[..., 0]
+        return Image.fromarray(mask_array.astype(np.uint8))
+
+
 class SegmentationDataModule(L.LightningDataModule):
     def __init__(
             self,
@@ -182,6 +331,8 @@ class SegmentationDataModule(L.LightningDataModule):
             ignore_index: int = 255,
             download: bool = True,
             cityscapes_mode: str = "fine",
+            val_fraction: float = 0.1,
+            test_fraction: float = 0.1,
             max_train_samples: Optional[int] = None,
             max_val_samples: Optional[int] = None,
             max_test_samples: Optional[int] = None,
@@ -199,6 +350,8 @@ class SegmentationDataModule(L.LightningDataModule):
         self.ignore_index = ignore_index
         self.download = download
         self.cityscapes_mode = str(cityscapes_mode)
+        self.val_fraction = float(val_fraction)
+        self.test_fraction = float(test_fraction)
         self.max_train_samples = max_train_samples
         self.max_val_samples = max_val_samples
         self.max_test_samples = max_test_samples
@@ -223,6 +376,8 @@ class SegmentationDataModule(L.LightningDataModule):
             return 21
         if dataset_name in {"cityscapes", "cityscapes_fine"}:
             return 19
+        if dataset_name in {"stanford_background", "stanford_background_segmentation"}:
+            return 9
         raise ValueError(f"Unknown segmentation dataset: {dataset_name}")
 
     def prepare_data(self):
@@ -241,8 +396,27 @@ class SegmentationDataModule(L.LightningDataModule):
             )
         elif self._is_cityscapes and self.download:
             raise ValueError(
-                "Cityscapes cannot be downloaded automatically. Download the fine annotations "
-                "and leftImg8bit files manually, then place them under data_dir/cityscapes."
+                "torchvision.datasets.Cityscapes does not support automatic download. "
+                "Download the fine annotations and leftImg8bit files manually, then place "
+                "them under data_dir/cityscapes."
+            )
+        elif self._is_cityscapes:
+            for split in ("train", "val"):
+                torchvision.datasets.Cityscapes(
+                    root=os.path.join(self.data_dir, "cityscapes"),
+                    split=split,
+                    mode=self.cityscapes_mode or "fine",
+                    target_type="semantic",
+                )
+        elif self._is_stanford_background:
+            StanfordBackgroundSegmentation(
+                self.data_dir,
+                split="train",
+                transform=self.train_transform,
+                val_fraction=self.val_fraction,
+                test_fraction=self.test_fraction,
+                subset_seed=self.subset_seed,
+                download=self.download,
             )
 
     @property
@@ -253,6 +427,10 @@ class SegmentationDataModule(L.LightningDataModule):
     def _is_cityscapes(self) -> bool:
         return self.dataset_name in {"cityscapes", "cityscapes_fine"}
 
+    @property
+    def _is_stanford_background(self) -> bool:
+        return self.dataset_name in {"stanford_background", "stanford_background_segmentation"}
+
     def setup(self, stage=None):
         if self._is_voc:
             train_dataset = self._build_voc_dataset("train", self.train_transform)
@@ -262,6 +440,10 @@ class SegmentationDataModule(L.LightningDataModule):
             train_dataset = self._build_cityscapes_dataset("train", self.train_transform)
             val_dataset = self._build_cityscapes_dataset("val", self.eval_transform)
             test_dataset = self._build_cityscapes_dataset("val", self.eval_transform)
+        elif self._is_stanford_background:
+            train_dataset = self._build_stanford_background_dataset("train", self.train_transform)
+            val_dataset = self._build_stanford_background_dataset("val", self.eval_transform)
+            test_dataset = self._build_stanford_background_dataset("test", self.eval_transform)
         else:
             raise ValueError(f"Unknown segmentation dataset: {self.dataset_name}")
 
@@ -284,13 +466,26 @@ class SegmentationDataModule(L.LightningDataModule):
         dataset = torchvision.datasets.Cityscapes(
             root=os.path.join(self.data_dir, "cityscapes"),
             split=split,
-            mode=self.cityscapes_mode,
+            mode=self.cityscapes_mode or "fine",
             target_type="semantic",
         )
         return CityscapesSegmentationWrapper(
             dataset,
             transform,
             ignore_index=self.ignore_index,
+        )
+
+    def _build_stanford_background_dataset(
+            self, split: str, transform: SegmentationTransform
+            ) -> Dataset:
+        return StanfordBackgroundSegmentation(
+            self.data_dir,
+            split=split,
+            transform=transform,
+            val_fraction=self.val_fraction,
+            test_fraction=self.test_fraction,
+            subset_seed=self.subset_seed,
+            download=False,
         )
 
     def _subset(self, dataset: Dataset, max_samples: Optional[int], split_name: str) -> Dataset:

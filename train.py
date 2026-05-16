@@ -177,6 +177,8 @@ def main(cfg: DictConfig):
             ignore_index=cfg.datamodule.get("ignore_index", 255),
             download=cfg.datamodule.get("download", True),
             cityscapes_mode=cfg.datamodule.get("cityscapes_mode", "fine"),
+            val_fraction=cfg.datamodule.get("val_fraction", 0.1),
+            test_fraction=cfg.datamodule.get("test_fraction", 0.1),
             max_train_samples=cfg.datamodule.get("max_train_samples", None),
             max_val_samples=cfg.datamodule.get("max_val_samples", None),
             max_test_samples=cfg.datamodule.get("max_test_samples", None),
@@ -213,6 +215,8 @@ def main(cfg: DictConfig):
             lr=lr,
             weight_decay=weight_decay,
             optimizer=optimizer_name,
+            scheduler=cfg.optimizer.get("scheduler", "warmup_cosine"),
+            warmup_epochs=cfg.optimizer.get("warmup_epochs", 0),
             model_cfg=model_cfg
         )
     elif cfg.task.name == "nlp_classification":

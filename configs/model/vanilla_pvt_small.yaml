@@ -1,7 +1,7 @@
 name: "vanilla_pvt_small"
 backbone_type: "pvt"
 attn_type: "vanilla"
-img_size: 320
+img_size: 224
 backbone_checkpoint_path: null
 
 embed_dims: [64, 128, 320, 512]

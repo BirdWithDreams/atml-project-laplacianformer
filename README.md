@@ -27,15 +27,19 @@ uv pip install seqeval
 
 Image tasks use only PVT-style backbones with 2D RoPE:
 
+- `vanilla_pvt_tiny`
 - `vanilla_pvt_small`
 - `vanilla_pvt_medium`
+- `laplacian_pvt_tiny_cuda`
 - `laplacian_pvt_small_cuda`
 - `laplacian_pvt_medium_cuda`
 
 Text tasks use only 1D sequence backbones:
 
+- `vanilla_1d_tiny`
 - `vanilla_1d_small`
 - `vanilla_1d_medium`
+- `laplacian_1d_cuda_tiny`
 - `laplacian_1d_cuda_small`
 - `laplacian_1d_cuda_medium`
 
@@ -85,9 +89,9 @@ uv run train.py task=generation_nlp model=vanilla_seq2seq_base datamodule=seq2se
 uv run train.py task=generation_nlp model=vanilla_seq2seq_base model.attn_type=laplacian datamodule=seq2seq trainer.precision=32
 ```
 
-ImageNet Sample (Imagenette) Classification:
+ImageNet Sample Classification:
 
-To test ImageNet classification without downloading the full 150GB dataset, you can fetch a 10-class sample (Imagenette).
+To test ImageNet classification without downloading the full 150GB dataset, you can fetch a 100-class sample.
 
 1. Download and extract the sample:
 ```bash

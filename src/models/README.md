@@ -17,8 +17,10 @@ Image tasks use one backbone family:
 
 Supported image configs:
 
+- `vanilla_pvt_tiny`
 - `vanilla_pvt_small`
 - `vanilla_pvt_medium`
+- `laplacian_pvt_tiny_cuda`
 - `laplacian_pvt_small_cuda`
 - `laplacian_pvt_medium_cuda`
 
@@ -36,8 +38,10 @@ Text tasks use 1D sequence backbones:
 
 Supported text configs:
 
+- `vanilla_1d_tiny`
 - `vanilla_1d_small`
 - `vanilla_1d_medium`
+- `laplacian_1d_cuda_tiny`
 - `laplacian_1d_cuda_small`
 - `laplacian_1d_cuda_medium`
 
