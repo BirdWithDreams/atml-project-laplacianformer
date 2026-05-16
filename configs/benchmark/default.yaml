@@ -6,7 +6,7 @@ fail_fast: false
 
 # Forward-only timing excludes data loading, host-to-device transfer, loss, and metric computation.
 warmup_batches: 5
-max_samples: 512
+max_samples: null
 max_batches: null
 subset_seed: 42
 subset_shuffle: true
@@ -25,4 +25,5 @@ output_csv: "benchmark_results.csv"
 # Optional per-run overrides:
 # - datamodule_overrides: {batch_size: 32, num_workers: 0}
 # - max_samples, max_batches, warmup_batches, precision, compile
+# - quality_metric: metric name used for quality-per-GB and quality-per-ms
 runs: []

@@ -33,8 +33,8 @@ Text tasks use 1D sequence backbones:
 
 - `text.py`: sequence classification backbone.
 - `text_ner.py`: token classification backbone for NER.
-- `laplacian_1d_attn.py`: CUDA-backed 1D Laplacian attention for text.
-- `laplacian_1d_cuda_ops.py`: autograd wrapper for `libs/laplacianformer_1d`.
+- `laplacian_1d_attn.py`: CUDA-backed exact 1D Laplacian attention for text, with an explicit Nyström mode for row-normalized long-sequence runs.
+- `laplacian_1d_cuda_ops.py`: autograd wrapper for the `libs/laplacianformer_1d` pairwise L1 distance primitive and Python Laplacian attention helpers.
 
 Supported text configs:
 

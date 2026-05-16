@@ -7,3 +7,6 @@ num_heads: 12
 lambda_scale: 8.0
 pool_ratio: 1
 ns_iters: 8
+attention_mode: "exact"
+normalization: "paper"
+use_fused_newton: true

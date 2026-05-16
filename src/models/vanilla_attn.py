@@ -167,7 +167,10 @@ class EncoderLayer(nn.Module):
                 num_heads=num_heads,
                 lambda_scale=attn_kwargs.get("lambda_scale", 4.0),
                 pool_ratio=attn_kwargs.get("pool_ratio", 2),
-                ns_iters=attn_kwargs.get("ns_iters", 5)
+                ns_iters=attn_kwargs.get("ns_iters", 5),
+                normalization=attn_kwargs.get("normalization", "paper"),
+                attention_mode=attn_kwargs.get("attention_mode", "exact"),
+                use_fused_newton=attn_kwargs.get("use_fused_newton", True),
             )
         else:
             raise ValueError("attn_type must be 'vanilla' or 'laplacian'")

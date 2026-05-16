@@ -107,14 +107,15 @@ def expand_runs(cfg: DictConfig) -> list[DictConfig]:
         if not isinstance(run_cfg, DictConfig):
             raise TypeError("Each benchmark run must be a mapping.")
         paths = expand_checkpoint_paths(run_cfg)
+        base_name = str(run_cfg.get("name", run_cfg.task))
         for index, checkpoint_path in enumerate(paths):
             run = OmegaConf.create(to_plain_container(run_cfg))
+            run.group_name = base_name
             run.checkpoint_path = str(checkpoint_path)
             if len(paths) > 1:
-                base_name = str(run_cfg.get("name", run_cfg.task))
                 run.name = f"{base_name}_{index:03d}_{checkpoint_path.stem}"
             else:
-                run.name = str(run_cfg.get("name", checkpoint_path.stem))
+                run.name = base_name
             expanded.append(run)
     return expanded
 
@@ -536,6 +537,99 @@ def compute_metrics(task_name: str, state: dict[str, Any]) -> dict[str, float]:
     raise ValueError(f"Unsupported task: {task_name}")
 
 
+def finite_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        converted = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not torch.isfinite(torch.tensor(converted)):
+        return None
+    return converted
+
+
+def numeric_values(values: list[Any]) -> list[float]:
+    return [converted for value in values if (converted := finite_float(value)) is not None]
+
+
+def mean_std(values: list[Any]) -> tuple[float | None, float | None]:
+    numbers = numeric_values(values)
+    if not numbers:
+        return None, None
+
+    mean = sum(numbers) / len(numbers)
+    if len(numbers) == 1:
+        return mean, 0.0
+
+    variance = sum((value - mean) ** 2 for value in numbers) / (len(numbers) - 1)
+    return mean, variance ** 0.5
+
+
+def default_quality_metric(task_name: str, metrics: dict[str, Any]) -> str | None:
+    preferred = {
+        "cv_classification": ("f1_macro", "accuracy"),
+        "nlp_classification": ("f1_macro", "accuracy"),
+        "ner_task": ("Entity_F1", "Token_F1", "token_accuracy"),
+        "semantic_segmentation": ("mIoU", "foreground_mIoU", "pixel_acc"),
+    }.get(task_name, ())
+
+    for key in preferred:
+        if finite_float(metrics.get(key)) is not None:
+            return key
+
+    for key, value in metrics.items():
+        if key != "loss" and finite_float(value) is not None:
+            return key
+    return None
+
+
+def quality_metric_for_result(result: dict[str, Any]) -> str | None:
+    configured = result.get("quality_metric")
+    metrics = result.get("metrics", {})
+    if configured:
+        if finite_float(metrics.get(configured)) is None:
+            raise ValueError(
+                f"Configured quality_metric='{configured}' is not present as a numeric metric "
+                f"for run '{result.get('name', '<unnamed>')}'. Available metrics: {sorted(metrics)}"
+            )
+        return str(configured)
+    return default_quality_metric(str(result.get("task", "")), metrics)
+
+
+def add_efficiency_scores(result: dict[str, Any]) -> dict[str, Any]:
+    if result.get("status") != "ok":
+        return result
+
+    quality_metric = quality_metric_for_result(result)
+    quality_score = finite_float(result.get("metrics", {}).get(quality_metric)) if quality_metric else None
+    peak_mb = finite_float(result.get("memory", {}).get("cuda_peak_allocated_mb"))
+    peak_gb = peak_mb / 1024.0 if peak_mb is not None else None
+    ms_per_batch = finite_float(result.get("timing", {}).get("ms_per_batch"))
+
+    efficiency = {
+        "quality_metric": quality_metric,
+        "quality_score": quality_score,
+        "cuda_peak_allocated_gb": peak_gb,
+        "quality_per_gb": (
+            quality_score / peak_gb
+            if quality_score is not None and peak_gb is not None and peak_gb > 0
+            else None
+        ),
+        "quality_per_ms": (
+            quality_score / ms_per_batch
+            if quality_score is not None and ms_per_batch is not None and ms_per_batch > 0
+            else None
+        ),
+    }
+    result["quality"] = {
+        "metric": quality_metric,
+        "score": quality_score,
+    }
+    result["efficiency"] = efficiency
+    return result
+
+
 def memory_start(device: torch.device) -> dict[str, float | None]:
     if device.type == "cuda":
         torch.cuda.empty_cache()
@@ -644,11 +738,17 @@ def benchmark_run(
     avg_ms_per_batch = (total_forward_time / max(total_batches, 1)) * 1000.0
     avg_ms_per_sample = (total_forward_time / max(total_samples, 1)) * 1000.0
 
-    return {
+    result = {
         "status": "ok",
         "name": str(run_cfg.name),
+        "group_name": str(run_cfg.get("group_name", run_cfg.name)),
         "task": task_name,
         "checkpoint_path": str(checkpoint_path),
+        "quality_metric": (
+            str(run_cfg.quality_metric)
+            if run_cfg.get("quality_metric") is not None
+            else None
+        ),
         "datamodule": to_plain_container(datamodule_cfg),
         "eval_split": eval_split,
         "device": str(device),
@@ -666,39 +766,89 @@ def benchmark_run(
         "memory": memory,
         "metrics": metrics,
     }
+    return add_efficiency_scores(result)
 
 
 def flatten_result(result: dict[str, Any]) -> dict[str, Any]:
     flat = {
-        "status": result.get("status"),
-        "name": result.get("name"),
-        "task": result.get("task"),
         "checkpoint_path": result.get("checkpoint_path"),
-        "eval_split": result.get("eval_split"),
         "device": result.get("device"),
-        "precision": result.get("precision"),
-        "num_samples": result.get("num_samples"),
-        "num_batches": result.get("num_batches"),
         "error": result.get("error"),
+        "eval_split": result.get("eval_split"),
+        "name": result.get("name"),
+        "num_batches": result.get("num_batches"),
+        "num_samples": result.get("num_samples"),
+        "precision": result.get("precision"),
+        "quality_metric": result.get("quality_metric"),
+        "status": result.get("status"),
+        "task": result.get("task"),
     }
-    for group in ("timing", "memory", "metrics"):
+    for group in ("memory", "metrics", "quality", "efficiency", "timing"):
         for key, value in result.get(group, {}).items():
             flat[f"{group}.{key}"] = value
     return flat
 
 
+def std_fields_for_row(row: dict[str, Any]) -> list[str]:
+    prefixes = ("memory.", "metrics.", "quality.score", "efficiency.", "timing.")
+    return [
+        field
+        for field, value in row.items()
+        if any(field.startswith(prefix) for prefix in prefixes)
+        and finite_float(value) is not None
+        and not field.endswith("_std")
+    ]
+
+
+def add_group_std_columns(rows: list[dict[str, Any]], results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    group_to_indices: dict[str, list[int]] = {}
+    for index, result in enumerate(results):
+        group_name = str(result.get("group_name") or result.get("name") or "<unnamed>")
+        group_to_indices.setdefault(group_name, []).append(index)
+
+    for indices in group_to_indices.values():
+        fields = sorted({field for index in indices for field in std_fields_for_row(rows[index])})
+        for field in fields:
+            _, std = mean_std([rows[index].get(field) for index in indices])
+            std_field = f"{field}_std"
+            for index in indices:
+                if field in rows[index]:
+                    rows[index][std_field] = std
+    return rows
+
+
+def flatten_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = [flatten_result(result) for result in results]
+    return add_group_std_columns(rows, results)
+
+
+def ordered_fieldnames(rows: list[dict[str, Any]]) -> list[str]:
+    all_fields = {field for row in rows for field in row.keys()}
+    ordered = []
+    for field in sorted(field for field in all_fields if not field.endswith("_std")):
+        ordered.append(field)
+        std_field = f"{field}_std"
+        if std_field in all_fields:
+            ordered.append(std_field)
+
+    for field in sorted(all_fields):
+        if field not in ordered:
+            ordered.append(field)
+    return ordered
+
+
 def write_outputs(results: list[dict[str, Any]], cfg: DictConfig):
     output_dir = resolve_path(cfg.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    rows = flatten_results(results)
 
     jsonl_path = output_dir / str(cfg.output_jsonl)
     with jsonl_path.open("w", encoding="utf-8") as handle:
-        for result in results:
-            handle.write(json.dumps(result, sort_keys=True) + "\n")
+        for row in rows:
+            handle.write(json.dumps(row, sort_keys=True) + "\n")
 
     csv_path = output_dir / str(cfg.output_csv)
-    rows = [flatten_result(result) for result in results]
-    fieldnames = sorted({field for row in rows for field in row.keys()})
+    fieldnames = ordered_fieldnames(rows)
     with csv_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
@@ -737,6 +887,7 @@ def main(cfg: DictConfig):
             result = {
                 "status": "failed",
                 "name": str(run_cfg.get("name", "<unnamed>")),
+                "group_name": str(run_cfg.get("group_name", run_cfg.get("name", "<unnamed>"))),
                 "task": str(run_cfg.get("task", "<unknown>")),
                 "checkpoint_path": str(run_cfg.get("checkpoint_path", "")),
                 "error": f"{type(exc).__name__}: {exc}",

@@ -11,6 +11,9 @@ class TextBackboneNER(nn.Module):
             dim=384, depth=6, num_heads=6, attn_type="vanilla",
             lambda_scale=4.0, pool_ratio=2, ns_iters=5,
             laplacian_backend="cuda_1d",
+            normalization="paper",
+            attention_mode="exact",
+            use_fused_newton=True,
             dropout=0.0,
             ):
         super().__init__()
@@ -24,6 +27,9 @@ class TextBackboneNER(nn.Module):
             "pool_ratio": pool_ratio,
             "ns_iters": ns_iters,
             "laplacian_backend": laplacian_backend,
+            "normalization": normalization,
+            "attention_mode": attention_mode,
+            "use_fused_newton": use_fused_newton,
         }
         
         self.blocks = nn.ModuleList(

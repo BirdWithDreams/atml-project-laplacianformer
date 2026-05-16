@@ -24,6 +24,9 @@ class TextTransformerBlock(nn.Module):
                 lambda_scale=attn_kwargs.get("lambda_scale", 4.0),
                 pool_ratio=attn_kwargs.get("pool_ratio", 2),
                 ns_iters=attn_kwargs.get("ns_iters", 5),
+                normalization=attn_kwargs.get("normalization", "paper"),
+                attention_mode=attn_kwargs.get("attention_mode", "exact"),
+                use_fused_newton=attn_kwargs.get("use_fused_newton", True),
             )
         else:
             raise ValueError("attn_type must be 'vanilla' or 'laplacian'")
@@ -58,6 +61,9 @@ class TextBackbone(nn.Module):
             dim=384, depth=6, num_heads=6, attn_type="vanilla",
             lambda_scale=4.0, pool_ratio=2, ns_iters=5,
             laplacian_backend="cuda_1d",
+            normalization="paper",
+            attention_mode="exact",
+            use_fused_newton=True,
             dropout=0.0,
             ):
         super().__init__()
@@ -71,6 +77,9 @@ class TextBackbone(nn.Module):
             "pool_ratio": pool_ratio,
             "ns_iters": ns_iters,
             "laplacian_backend": laplacian_backend,
+            "normalization": normalization,
+            "attention_mode": attention_mode,
+            "use_fused_newton": use_fused_newton,
         }
         
         # [CLS] token equivalent is usually first token or pooled. In BERT, it's the first token.

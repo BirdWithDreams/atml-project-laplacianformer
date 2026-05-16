@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import find_packages, setup
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 import os
 
@@ -7,6 +7,7 @@ this_dir = os.path.dirname(os.path.abspath(__file__))
 
 setup(
     name="laplacian_1d_cuda",
+    packages=find_packages(),
     ext_modules=[
         CUDAExtension(
             name="laplacian_1d_cuda",

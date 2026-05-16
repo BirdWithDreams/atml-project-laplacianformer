@@ -1,40 +1,18 @@
+import math
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from .laplacian_1d_cuda_ops import (
     can_use_laplacian_1d_cuda,
+    exact_laplacian_attention_1d,
     extension_diagnostics,
-    laplacian_kernel_1d_cuda,
+    nystrom_laplacian_attention_1d,
 )
-from .laplacian_cuda_ops import (
-    can_use_laplacian_cuda as can_use_newton_cuda,
-    extension_diagnostics as newton_extension_diagnostics,
-    newton_inverse_cuda,
-)
-
-
-class CudaNewtonSchulzInverse(nn.Module):
-    """Newton inverse backed by the original LaplacianFormer CUDA extension."""
-
-    def __init__(self, num_iters: int = 5):
-        super().__init__()
-        self.num_iters = num_iters
-
-    def forward(self, W: torch.Tensor) -> torch.Tensor:
-        matrix_size = W.shape[-1]
-        if can_use_newton_cuda(W, matrix_size=matrix_size):
-            return newton_inverse_cuda(W.contiguous(), self.num_iters)
-
-        raise RuntimeError(
-            "1D Laplacian attention requires the CUDA Newton inverse. "
-            f"shape={tuple(W.shape)}, dtype={W.dtype}, device={W.device}. "
-            f"{newton_extension_diagnostics()}"
-        )
 
 
 class CudaLaplacian1DLinearAttention(nn.Module):
-    """1D Laplacian attention for text using the custom CUDA distance kernel."""
+    """1D Laplacian attention for text using the custom CUDA L1 distance kernel."""
 
     def __init__(
             self,
@@ -43,35 +21,90 @@ class CudaLaplacian1DLinearAttention(nn.Module):
             lambda_scale: float = 4.0,
             pool_ratio: int = 2,
             ns_iters: int = 5,
+            normalization: str = "paper",
+            attention_mode: str = "exact",
+            use_dwconv: bool = True,
+            use_fused_newton: bool = True,
             ):
         super().__init__()
         assert dim % num_heads == 0, "dim must be divisible by num_heads"
+        if normalization not in {"paper", "row"}:
+            raise ValueError("normalization must be 'paper' or 'row'")
+        if attention_mode not in {"exact", "nystrom"}:
+            raise ValueError("attention_mode must be 'exact' or 'nystrom'")
+
         self.dim = dim
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
         self.lambda_scale = lambda_scale
         self.pool_ratio = pool_ratio
+        self.ns_iters = ns_iters
+        self.normalization = normalization
+        self.attention_mode = attention_mode
+        self.use_fused_newton = use_fused_newton
 
         self.qkv = nn.Linear(dim, dim * 3)
         self.proj = nn.Linear(dim, dim)
-        self.inverse_solver = CudaNewtonSchulzInverse(num_iters=ns_iters)
-        self.dwc = nn.Conv1d(dim, dim, kernel_size=3, padding=1, groups=dim)
-        self.white_eps = 1e-5
+        self.dwc = nn.Conv1d(dim, dim, kernel_size=3, padding=1, groups=dim) if use_dwconv else None
+        self.eps = 1e-6
 
-    def laplacian_kernel(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        if can_use_laplacian_1d_cuda(x):
-            return laplacian_kernel_1d_cuda(x, y, self.lambda_scale)
+    def _dwconv_value(self, value: torch.Tensor, token_mask: torch.Tensor | None) -> torch.Tensor:
+        if self.dwc is None:
+            return torch.zeros_like(value)
 
-        raise RuntimeError(
-            "1D Laplacian attention requires the custom CUDA kernel. "
-            f"x_shape={tuple(x.shape)}, y_shape={tuple(y.shape)}, "
-            f"dtype={x.dtype}, device={x.device}. {extension_diagnostics()}"
+        batch_size, num_heads, seq_len, head_dim = value.shape
+        v_1d = value.permute(0, 1, 3, 2).reshape(batch_size, num_heads * head_dim, seq_len)
+        local = self.dwc(v_1d)
+        local = local.reshape(batch_size, num_heads, head_dim, seq_len).permute(0, 1, 3, 2)
+        if token_mask is not None:
+            local = local * token_mask[:, None, :, None]
+        return local
+
+    def _global_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        if not can_use_laplacian_1d_cuda(q):
+            raise RuntimeError(
+                "1D Laplacian attention requires the custom CUDA distance kernel. "
+                f"shape={tuple(q.shape)}, dtype={q.dtype}, device={q.device}. "
+                f"{extension_diagnostics()}"
+            )
+
+        if self.attention_mode == "exact":
+            return exact_laplacian_attention_1d(
+                query=q,
+                key=k,
+                value=v,
+                lambda_=self.lambda_scale,
+                eps=self.eps,
+                normalization=self.normalization,
+            )
+
+        if self.normalization != "row":
+            raise RuntimeError(
+                "Nyström 1D attention currently implements the row-normalized "
+                "kernel baseline. Use attention_mode='exact' for paper normalization."
+            )
+
+        seq_len = q.shape[-2]
+        pool_ratio = max(1, min(self.pool_ratio, seq_len))
+        num_landmarks = max(1, math.ceil(seq_len / pool_ratio))
+        return nystrom_laplacian_attention_1d(
+            query=q,
+            key=k,
+            value=v,
+            num_landmarks=num_landmarks,
+            lambda_=self.lambda_scale,
+            eps=1e-4,
+            ns_iters=self.ns_iters,
+            use_fused_newton=self.use_fused_newton,
         )
 
     def forward(self, x: torch.Tensor, attention_mask: torch.Tensor | None = None) -> torch.Tensor:
         batch_size, seq_len, channels = x.shape
+        if channels != self.dim:
+            raise ValueError(f"Expected input dim {self.dim}, got {channels}")
+
         if attention_mask is None:
-            token_mask = torch.ones(batch_size, seq_len, device=x.device, dtype=x.dtype)
+            token_mask = None
         else:
             if attention_mask.shape != (batch_size, seq_len):
                 raise ValueError(
@@ -79,10 +112,6 @@ class CudaLaplacian1DLinearAttention(nn.Module):
                     f"got {tuple(attention_mask.shape)}"
                 )
             token_mask = attention_mask.to(dtype=x.dtype)
-
-        effective_pool = min(self.pool_ratio, seq_len)
-        token_mask_seq = token_mask.unsqueeze(1)
-        token_mask_heads = token_mask.unsqueeze(1).unsqueeze(-1)
 
         qkv = self.qkv(x).reshape(
             batch_size,
@@ -92,80 +121,21 @@ class CudaLaplacian1DLinearAttention(nn.Module):
             self.head_dim,
         ).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]
-        q = q * token_mask_heads
-        k = k * token_mask_heads
-        v = v * token_mask_heads
+        if token_mask is not None:
+            token_mask_heads = token_mask[:, None, :, None]
+            q = q * token_mask_heads
+            k = k * token_mask_heads
+            v = v * token_mask_heads
 
-        v_spatial = v.transpose(1, 2).reshape(batch_size, channels, seq_len)
-        v_local = self.dwc(v_spatial).transpose(1, 2)
-        v_local = v_local * token_mask.unsqueeze(-1)
+        global_attn = self._global_attention(q, k, v)
+        local_attn = self._dwconv_value(v, token_mask)
 
-        q_spatial = q.transpose(1, 2).reshape(batch_size, channels, seq_len)
-        k_spatial = k.transpose(1, 2).reshape(batch_size, channels, seq_len)
-        pooled_mask = F.avg_pool1d(
-            token_mask_seq,
-            effective_pool,
-            effective_pool,
-            ceil_mode=True,
-        )
-        pooled_mask_safe = pooled_mask.clamp_min(1e-6)
+        y = global_attn + local_attn
+        if token_mask is not None:
+            y = y * token_mask[:, None, :, None]
 
-        q_pool = F.avg_pool1d(
-            q_spatial * token_mask_seq,
-            effective_pool,
-            effective_pool,
-            ceil_mode=True,
-        ) / pooled_mask_safe
-        k_pool = F.avg_pool1d(
-            k_spatial * token_mask_seq,
-            effective_pool,
-            effective_pool,
-            ceil_mode=True,
-        ) / pooled_mask_safe
-        landmark_mask = (pooled_mask > 0).to(dtype=x.dtype).squeeze(1)
-
-        q_landmark = q_pool.transpose(1, 2).reshape(
-            batch_size,
-            -1,
-            self.num_heads,
-            self.head_dim,
-        ).transpose(1, 2)
-        k_landmark = k_pool.transpose(1, 2).reshape(
-            batch_size,
-            -1,
-            self.num_heads,
-            self.head_dim,
-        ).transpose(1, 2)
-
-        W = self.laplacian_kernel(q_landmark, k_landmark)
-        num_landmarks = W.shape[-1]
-        landmark_pair_mask = landmark_mask[:, None, :, None] * landmark_mask[:, None, None, :]
-        identity = torch.eye(num_landmarks, device=x.device, dtype=x.dtype).view(
-            1,
-            1,
-            num_landmarks,
-            num_landmarks,
-        )
-        W = W * landmark_pair_mask + identity * (1 - landmark_pair_mask)
-        W_inv = self.inverse_solver(W)
-
-        landmark_attn_mask = landmark_mask[:, None, None, :]
-        C_q = self.laplacian_kernel(q, k_landmark) * landmark_attn_mask
-        C_k = self.laplacian_kernel(k, q_landmark) * landmark_attn_mask
-
-        query_mask = token_mask[:, None, :, None]
-        valid_queries = query_mask.sum(dim=(0, 2), keepdim=True).clamp_min(1.0)
-        mu = (C_q * query_mask).sum(dim=(0, 2), keepdim=True) / valid_queries
-        centered = (C_q - mu) * query_mask
-        var = centered.pow(2).sum(dim=(0, 2), keepdim=True) / valid_queries
-        C_q_norm = (C_q - mu) / torch.sqrt(var + self.white_eps)
-        C_q_norm = C_q_norm * query_mask
-
-        context = torch.matmul(C_k.transpose(-2, -1), v)
-        context = torch.matmul(W_inv, context)
-        global_attn = torch.matmul(C_q_norm, context)
-        global_attn = global_attn * token_mask_heads
-
-        global_attn = global_attn.transpose(1, 2).reshape(batch_size, seq_len, channels)
-        output = self.proj(global_attn + v_local)
-        return output * token_mask.unsqueeze(-1)
+        y = y.transpose(1, 2).reshape(batch_size, seq_len, channels)
+        output = self.proj(y)
+        if token_mask is not None:
+            output = output * token_mask.unsqueeze(-1)
+        return output
