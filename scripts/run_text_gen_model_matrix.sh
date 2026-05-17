@@ -18,18 +18,22 @@ DEFAULT_OPTIMIZERS=(
 
 DEFAULT_DATASETS=(
   wikitext2
+  seq2seq
 )
 
-# Laplacian-specific defaults[cite: 2]
+# Laplacian-specific defaults
 DEFAULT_LAMBDAS=(4 8)
 DEFAULT_POOL_RATIOS=(2 4)
 
+# Hardware & Training Defaults
 ACCELERATOR="${ACCELERATOR:-gpu}"
-DEVICES="${DEVICES:-1}"
-PRECISION="${PRECISION:-32}"
-WANDB_PROJECT="${WANDB_PROJECT:-text-gen-model-matrix}"
+DEVICES="${DEVICES:-1}"            # Single GPU is safer for custom CUDA kernels
+PRECISION="${PRECISION:-32}"        # Laplacian CUDA requires 32-bit
 COMPILE="${COMPILE:-false}"
-ACCUMULATE_GRAD_BATCHES="${ACCUMULATE_GRAD_BATCHES:-}"
+ACCUMULATE_GRAD_BATCHES="${ACCUMULATE_GRAD_BATCHES:-8}"
+BATCH_SIZE="${BATCH_SIZE:-8}"       # OOM-safe default for text models
+WANDB_PROJECT="${WANDB_PROJECT:-text-gen-model-matrix}"
+SEED="${SEED:-42}"
 
 # --- Environment Overrides ---
 if [ -n "${MODELS:-}" ]; then read -r -a MODEL_LIST <<< "${MODELS}"; else MODEL_LIST=("${DEFAULT_MODELS[@]}"); fi
@@ -57,14 +61,16 @@ for dataset in "${DATASET_LIST[@]}"; do
   for optimizer in "${OPTIMIZER_LIST[@]}"; do
     for model in "${MODEL_LIST[@]}"; do
       
-      # Determine if we need to sweep Laplacian parameters[cite: 1, 2]
+      # Determine stability parameters
       if [[ "${model}" == *"laplacian"* ]]; then
         CURRENT_LAMBDAS=("${LAMBDA_LIST[@]}")
         CURRENT_POOLS=("${POOL_LIST[@]}")
+        # Stability Fixes for custom CUDA kernels
+        STABILITY_ARGS=("++optimizer.lr=5e-5" "+trainer.gradient_clip_val=1.0")
       else
-        # For vanilla models, run exactly once without lambda/pool sweeps
         CURRENT_LAMBDAS=("N/A")
         CURRENT_POOLS=("N/A")
+        STABILITY_ARGS=()
       fi
 
       for lambd in "${CURRENT_LAMBDAS[@]}"; do
@@ -73,9 +79,9 @@ for dataset in "${DATASET_LIST[@]}"; do
           MODEL_ARGS=(model="${model}")
           run_name="gen_${dataset}_${model}_${optimizer}"
 
-          # Append Laplacian args only if applicable
+          # Append Laplacian args with proper Hydra '++' overrides
           if [[ "${model}" == *"laplacian"* ]]; then
-            MODEL_ARGS+=("+model.lambda_scale=${lambd}" "+model.pool_ratio=${pool}")
+            MODEL_ARGS+=("++model.lambda_scale=${lambd}" "++model.pool_ratio=${pool}")
             run_name="gen_${dataset}_${model}_L${lambd}_P${pool}_${optimizer}"
           fi
 
@@ -86,7 +92,9 @@ for dataset in "${DATASET_LIST[@]}"; do
           if ! "${TRAIN_CMD_LIST[@]}" train.py \
             task=generation_nlp \
             datamodule="${dataset}" \
+            datamodule.batch_size="${BATCH_SIZE}" \
             "${MODEL_ARGS[@]}" \
+            "${STABILITY_ARGS[@]}" \
             optimizer="${optimizer}" \
             trainer.accelerator="${ACCELERATOR}" \
             trainer.devices="${DEVICES}" \
@@ -95,6 +103,7 @@ for dataset in "${DATASET_LIST[@]}"; do
             "${GRAD_ACCUM_ARGS[@]}" \
             logger.project="${WANDB_PROJECT}" \
             logger.name="${run_name}" \
+            seed="${SEED}" \
             "${EXTRA_ARGS[@]}"; then
             echo "Run failed: ${run_name}"
             FAILED_RUNS+=("${run_name}")
