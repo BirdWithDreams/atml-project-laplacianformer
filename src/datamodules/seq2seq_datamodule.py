@@ -2,6 +2,7 @@ import lightning as L
 import torch
 from torch.utils.data import DataLoader
 import pyarrow as pa
+from pathlib import Path
 
 # Compatibility shim for datasets versions expecting PyExtensionType.
 if not hasattr(pa, "PyExtensionType"):
@@ -9,6 +10,7 @@ if not hasattr(pa, "PyExtensionType"):
 
 from datasets import load_dataset
 from transformers import AutoTokenizer
+from huggingface_hub import snapshot_download
 
 class Seq2SeqDataModule(L.LightningDataModule):
     def __init__(
@@ -48,12 +50,50 @@ class Seq2SeqDataModule(L.LightningDataModule):
             return load_dataset(self.dataset_name)
         except ValueError as exc:
             # fsspec/huggingface_hub incompatibility can break scripted wikitext loading.
-            # Retry using the namespaced dataset repo used on the Hub.
+            # Fallback to a local snapshot path that avoids Hub-side globbing.
             if self.dataset_name == "wikitext" and "Invalid pattern" in str(exc):
-                if self.dataset_config:
-                    return load_dataset("Salesforce/wikitext", self.dataset_config)
-                return load_dataset("Salesforce/wikitext")
+                return self._load_wikitext_from_local_snapshot()
             raise
+
+    def _load_wikitext_from_local_snapshot(self):
+        repo_id = "Salesforce/wikitext"
+        local_root = Path(snapshot_download(repo_id=repo_id, repo_type="dataset"))
+
+        search_roots = [local_root]
+        if self.dataset_config:
+            cfg_root = local_root / self.dataset_config
+            if cfg_root.exists():
+                search_roots.insert(0, cfg_root)
+
+        def find_split_file(split_name: str, suffix: str):
+            for root in search_roots:
+                for path in root.rglob(f"*.{suffix}"):
+                    name = path.name.lower()
+                    if split_name in name:
+                        return str(path)
+            return None
+
+        data_files = {
+            "train": find_split_file("train", "parquet"),
+            "validation": find_split_file("validation", "parquet"),
+            "test": find_split_file("test", "parquet"),
+        }
+
+        if all(data_files.values()):
+            return load_dataset("parquet", data_files=data_files)
+
+        data_files = {
+            "train": find_split_file("train", "txt"),
+            "validation": find_split_file("validation", "txt"),
+            "test": find_split_file("test", "txt"),
+        }
+        if all(data_files.values()):
+            return load_dataset("text", data_files=data_files)
+
+        raise RuntimeError(
+            "Could not resolve local WikiText split files from snapshot. "
+            "Expected train/validation/test files in parquet or txt format."
+        )
 
     @staticmethod
     def _collate_batch(batch):
