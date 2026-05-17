@@ -41,6 +41,20 @@ class Seq2SeqDataModule(L.LightningDataModule):
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
+    def _load_dataset(self):
+        try:
+            if self.dataset_config:
+                return load_dataset(self.dataset_name, self.dataset_config)
+            return load_dataset(self.dataset_name)
+        except ValueError as exc:
+            # fsspec/huggingface_hub incompatibility can break scripted wikitext loading.
+            # Retry using the namespaced dataset repo used on the Hub.
+            if self.dataset_name == "wikitext" and "Invalid pattern" in str(exc):
+                if self.dataset_config:
+                    return load_dataset("Salesforce/wikitext", self.dataset_config)
+                return load_dataset("Salesforce/wikitext")
+            raise
+
     @staticmethod
     def _collate_batch(batch):
         output = {
@@ -52,16 +66,10 @@ class Seq2SeqDataModule(L.LightningDataModule):
 
     def prepare_data(self):
         # Download the dataset to disk
-        if self.dataset_config:
-            load_dataset(self.dataset_name, self.dataset_config)
-        else:
-            load_dataset(self.dataset_name)
+        self._load_dataset()
 
     def setup(self, stage=None):
-        if self.dataset_config:
-            dataset = load_dataset(self.dataset_name, self.dataset_config)
-        else:
-            dataset = load_dataset(self.dataset_name)
+        dataset = self._load_dataset()
 
         def tokenize_function(examples):
             # Handle standard flat columns vs nested 'translation' dicts (like WMT)
