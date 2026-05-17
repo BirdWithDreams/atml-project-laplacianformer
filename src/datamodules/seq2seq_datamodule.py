@@ -1,6 +1,12 @@
 import lightning as L
 import torch
 from torch.utils.data import DataLoader
+import pyarrow as pa
+
+# Compatibility shim for datasets versions expecting PyExtensionType.
+if not hasattr(pa, "PyExtensionType"):
+    pa.PyExtensionType = pa.ExtensionType
+
 from datasets import load_dataset
 from transformers import AutoTokenizer
 
