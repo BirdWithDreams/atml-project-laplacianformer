@@ -1,7 +1,5 @@
 project: "laplacian-vs-vanilla"
 name: "${task.name}_${model.name}_${datamodule.name}_${optimizer.name}"
-<<<<<<< HEAD
-=======
 extra_tags: []
 save_dir: "./results"
 
@@ -17,4 +15,3 @@ checkpoint_auto_insert_metric_name: false
 log_segmentation_images: true
 num_log_segmentation_images: 4
 log_segmentation_images_every_n_epochs: 1
->>>>>>> d35ed28 (Use readable checkpoint directories)
