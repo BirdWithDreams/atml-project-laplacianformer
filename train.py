@@ -190,6 +190,34 @@ def main(cfg: DictConfig):
             num_workers=cfg.datamodule.num_workers
         )
         num_classes = cfg.datamodule.num_classes
+    elif cfg.task.name == "generation_nlp":
+        from src.datamodules.seq2seq_datamodule import Seq2SeqDataModule
+        datamodule = Seq2SeqDataModule(
+            model_name=cfg.datamodule.get("model_name", "t5-small"),
+            dataset_name=cfg.datamodule.dataset_name,
+            dataset_config=cfg.datamodule.get(
+                "dataset_config",
+                cfg.datamodule.get("dataset_config_name", None),
+            ),
+            source_column=cfg.datamodule.get(
+                "source_column",
+                cfg.datamodule.get("text_column", "text"),
+            ),
+            target_column=cfg.datamodule.get(
+                "target_column",
+                cfg.datamodule.get("text_column", "text"),
+            ),
+            batch_size=cfg.datamodule.batch_size,
+            num_workers=cfg.datamodule.num_workers,
+            max_source_length=cfg.datamodule.get(
+                "max_source_length",
+                cfg.datamodule.get("max_length", 512),
+            ),
+            max_target_length=cfg.datamodule.get(
+                "max_target_length",
+                cfg.datamodule.get("max_length", 128),
+            ),
+        )
     else:
         raise ValueError(f"Unknown task: {cfg.task.name}")
 
@@ -273,7 +301,8 @@ def main(cfg: DictConfig):
             model_cfg=model_cfg,
             pad_token_id=datamodule.tokenizer.pad_token_id,
             bos_token_id=datamodule.tokenizer.bos_token_id or datamodule.tokenizer.pad_token_id,
-            eos_token_id=datamodule.tokenizer.eos_token_id
+            eos_token_id=datamodule.tokenizer.eos_token_id,
+            tokenizer=datamodule.tokenizer,
         )
 
     elif cfg.task.name == "detection":
@@ -285,7 +314,6 @@ def main(cfg: DictConfig):
             optimizer=cfg.task.optimizer,
             model_cfg=model_cfg
         )
-    task = torch.compile(task)
 
     # 3. Setup Logger
     wandb_tags = build_wandb_tags(cfg)
